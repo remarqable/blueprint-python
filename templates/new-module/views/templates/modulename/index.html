@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _("Module Name") }} - My App{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>{{ _("Module Name") }}</h1>
+        <!-- Example: Add button with HTMX modal -->
+        <!--
+        <button class="btn btn-primary"
+                hx-get="{{ url_for('modulename_bp.modal_new') }}"
+                hx-target="#modals">
+            {{ _("Add Item") }}
+        </button>
+        -->
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <p>{{ _("Welcome to your new module!") }}</p>
+            <p class="text-muted">Edit this template at: views/templates/modulename/index.html</p>
+        </div>
+    </div>
+</div>
+
+<!-- Modal container for HTMX -->
+<div id="modals"></div>
+{% endblock %}
