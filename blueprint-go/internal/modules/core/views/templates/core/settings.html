@@ -1,0 +1,115 @@
+{{define "title"}}{{T "Settings"}} - Blueprint{{end}}
+
+{{define "content"}}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>
+            <i class="fa-solid fa-cog me-2"></i>{{T "Settings"}}
+        </h1>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-8">
+            <!-- Profile Settings -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="fa-solid fa-user me-2"></i>{{T "Profile"}}
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="/settings/profile">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="first_name" class="form-label">{{T "First Name"}}</label>
+                                <input type="text" class="form-control" id="first_name" name="first_name"
+                                       value="{{.user.FirstName}}">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="last_name" class="form-label">{{T "Last Name"}}</label>
+                                <input type="text" class="form-control" id="last_name" name="last_name"
+                                       value="{{.user.LastName}}">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="email" class="form-label">{{T "Email"}}</label>
+                            <input type="email" class="form-control" id="email" name="email"
+                                   value="{{.user.Email}}" readonly>
+                            <div class="form-text">{{T "Email cannot be changed"}}</div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fa-solid fa-save me-2"></i>{{T "Save Changes"}}
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Password Settings -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <i class="fa-solid fa-lock me-2"></i>{{T "Change Password"}}
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="/settings/password">
+                        <div class="mb-3">
+                            <label for="current_password" class="form-label">{{T "Current Password"}}</label>
+                            <input type="password" class="form-control" id="current_password" name="current_password">
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="new_password" class="form-label">{{T "New Password"}}</label>
+                                <input type="password" class="form-control" id="new_password" name="new_password"
+                                       minlength="6">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="confirm_password" class="form-label">{{T "Confirm Password"}}</label>
+                                <input type="password" class="form-control" id="confirm_password" name="confirm_password"
+                                       minlength="6">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-warning">
+                            <i class="fa-solid fa-key me-2"></i>{{T "Update Password"}}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <!-- Account Info -->
+            <div class="card">
+                <div class="card-header">
+                    <i class="fa-solid fa-info-circle me-2"></i>{{T "Account Info"}}
+                </div>
+                <div class="card-body">
+                    <dl class="mb-0">
+                        <dt>{{T "Account ID"}}</dt>
+                        <dd class="text-muted">#{{.user.ID}}</dd>
+
+                        <dt>{{T "Email"}}</dt>
+                        <dd class="text-muted">{{.user.Email}}</dd>
+
+                        <dt>{{T "Status"}}</dt>
+                        <dd>
+                            {{if .user.IsActive}}
+                            <span class="badge bg-success">{{T "Active"}}</span>
+                            {{else}}
+                            <span class="badge bg-danger">{{T "Inactive"}}</span>
+                            {{end}}
+                        </dd>
+
+                        <dt>{{T "Groups"}}</dt>
+                        <dd>
+                            {{range .user.Groups}}
+                            <span class="badge bg-secondary me-1">{{.Name}}</span>
+                            {{end}}
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}
