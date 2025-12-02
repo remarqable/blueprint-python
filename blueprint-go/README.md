@@ -1,141 +1,126 @@
 # Blueprint Go
 
-A modular Go web application framework using Gin, GORM, and server-rendered HTML.
+> Documentation-only blueprint for building modular Go web applications with Gin, GORM, and HTMX.
+> Use as a git submodule for AI/LLM-guided development.
+
+## What This Is
+
+Blueprint Go is a **documentation-only reference** - patterns and templates for AI/LLM agents to follow when building Go web applications. It is NOT runnable code.
+
+**Similar to:** [blueprint-python](../README.md) - the Python version of this blueprint
+
+## Usage as Git Submodule
+
+```bash
+# Add to your project
+git submodule add <repo-url> blueprint-go
+
+# AI agents read CLAUDE.md and patterns/ for guidance
+```
 
 ## Features
 
-- **Modular Architecture** - Self-contained modules with models, handlers, views, and translations
-- **Fat Models** - Business logic in repository pattern, thin controllers
-- **Server-Rendered HTML** - html/template with HTMX and Alpine.js for interactivity
-- **Session Authentication** - Cookie-based auth with group permissions
-- **i18n Support** - Module-scoped JSON translation files
-- **Single-Tenant** - Designed for single organization deployments
+- **Modular Architecture** - Self-contained modules with models, handlers, views, translations
+- **Fat Models, Thin Controllers** - Business logic in repositories
+- **Server-Rendered HTML** - html/template + HTMX, no SPA complexity
+- **CSS-First Frontend** - Minimal Alpine.js, CSS animations preferred
+- **Locality of Behavior** - Keep styles close to usage
+- **i18n from Day 1** - Module-scoped JSON translations
+- **Security Built-In** - CSRF, rate limiting, validation patterns
 
-## Tech Stack
+## Tech Stack (Recommended)
 
 | Component | Technology |
 |-----------|------------|
-| Web Framework | [Gin](https://gin-gonic.com/) |
-| ORM | [GORM](https://gorm.io/) |
-| Database | SQLite (default) |
-| Migrations | [Goose](https://github.com/pressly/goose) |
-| Templates | html/template |
-| Frontend | HTMX + Alpine.js + Bootstrap 5 |
-| Sessions | gin-contrib/sessions |
+| **Language** | Go 1.21+ |
+| **Web Framework** | [Gin](https://gin-gonic.com/) |
+| **ORM** | [GORM](https://gorm.io/) |
+| **Database** | SQLite (dev) / PostgreSQL (prod) |
+| **Migrations** | [Goose](https://github.com/pressly/goose) |
+| **Templates** | html/template |
+| **Frontend** | HTMX + Alpine.js (minimal) + Bootstrap 5 |
+| **Sessions** | gin-contrib/sessions |
 
-## Quick Start
-
-### Prerequisites
-
-- Go 1.21+
-- GCC (for SQLite CGO)
-
-### Installation
-
-```bash
-# Clone repository
-git clone <repo-url>
-cd blueprint-go
-
-# Install dependencies
-go mod download
-
-# Copy environment file
-cp .env.example .env
-
-# Run the application
-make run
-```
-
-### Access
-
-- **URL**: http://localhost:8000
-- **Default Admin**: admin@example.com / admin
-
-## Project Structure
+## Documentation Structure
 
 ```
 blueprint-go/
-├── cmd/server/main.go          # Entry point
-├── internal/
-│   ├── app/                    # Application factory
-│   ├── system/                 # Core framework
-│   │   ├── db/                 # GORM database
-│   │   ├── auth/               # Authentication
-│   │   ├── module/             # Module loader
-│   │   ├── i18n/               # Translations
-│   │   └── template/           # Template engine
-│   └── modules/                # Application modules
-│       └── core/               # Core module (required)
-│           ├── models/         # User, Group, UserSetting
-│           ├── handlers/       # Auth, Dashboard
-│           └── views/          # Templates, translations
-├── migrations/                 # Goose SQL migrations
-├── patterns/                   # Documentation
-└── Makefile
+├── CLAUDE.md                   # Master AI guide (~1000 lines)
+├── README.md                   # This file
+├── patterns/                   # Detailed pattern guides
+│   ├── module-system.md        # Module interfaces, loading
+│   ├── mvc.md                  # Fat models, thin handlers
+│   ├── database.md             # GORM patterns
+│   ├── auth.md                 # Session auth, groups
+│   ├── frontend.md             # HTMX, minimal Alpine, CSS-first
+│   ├── htmx.md                 # Server-driven interactivity
+│   ├── i18n.md                 # JSON translations
+│   ├── security.md             # CSRF, rate limiting
+│   ├── audit.md                # Created/updated by tracking
+│   ├── typing.md               # Go type patterns
+│   ├── testing.md              # Unit/integration tests
+│   └── deployment.md           # Docker, production
+└── templates/                  # Starter files
+    └── new-module/             # Copy for new modules
+        ├── manifest.go
+        ├── module.go
+        ├── models/item.go
+        ├── handlers/routes.go
+        ├── views/templates/
+        └── lang/en.json
 ```
 
-## Creating a Module
+## For AI Agents
 
-1. **Create directory structure**:
-```bash
-mkdir -p internal/modules/yourmodule/{models,handlers,views/templates/yourmodule,views/lang}
+1. **Start with** [CLAUDE.md](CLAUDE.md) - comprehensive guide
+2. **Quick Start section** - 10-minute module bootstrap
+3. **Pattern files** for specific topics
+4. **templates/new-module/** - starter files to copy
+
+## Module Structure Pattern
+
+```
+internal/modules/yourmodule/
+├── manifest.go         # Module metadata
+├── module.go           # Module interface
+├── models/
+│   └── item.go         # Model + Repository
+├── handlers/
+│   └── routes.go       # Gin handlers
+├── views/
+│   └── templates/yourmodule/
+│       ├── index.html
+│       └── partials/_list.html
+└── lang/
+    ├── en.json
+    └── es.json
 ```
 
-2. **Create manifest.go**:
-```go
-package yourmodule
+## Key Principles
 
-import "blueprint-go/internal/system/module"
+1. **Modular by design** - Self-contained feature modules
+2. **Fat Models** - Business logic in repositories, not handlers
+3. **Server-rendered** - HTMX for interactivity, no SPA
+4. **CSS-first** - Use CSS for animations, Alpine.js minimally
+5. **Locality** - Keep styles in templates, not global CSS
+6. **i18n ready** - Translations from day 1
 
-var Manifest = module.Manifest{
-    Name:      "YourModule",
-    Version:   "1.0",
-    MainRoute: "/yourmodule",
-    Type:      module.ModuleTypeApp,
-    Depends:   []string{"core"},
-    IconClass: "fa-solid fa-cube",
-}
-```
+## Pattern Files
 
-3. **Create module.go** implementing `Module` interface
-4. **Register in main.go**
-
-See [patterns/module-system.md](patterns/module-system.md) for complete guide.
-
-## Available Commands
-
-```bash
-make run            # Run development server
-make build          # Build binary
-make test           # Run tests
-make test-coverage  # Run tests with coverage
-make migrate-up     # Apply migrations
-make migrate-down   # Rollback migration
-make migrate-status # Show migration status
-make fmt            # Format code
-make lint           # Lint code
-```
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `SECRET_KEY` | Session encryption key | `dev` |
-| `DATABASE_URL` | SQLite file path | `app.db` |
-| `DEBUG` | Enable debug mode | `false` |
-| `PORT` | HTTP port | `8000` |
-
-## Documentation
-
-- [CLAUDE.md](CLAUDE.md) - AI agent guide (conventions, patterns)
-- [patterns/module-system.md](patterns/module-system.md) - Module architecture
-- [patterns/database.md](patterns/database.md) - GORM patterns
-- [patterns/auth.md](patterns/auth.md) - Authentication
-- [patterns/i18n.md](patterns/i18n.md) - Internationalization
-- [patterns/frontend.md](patterns/frontend.md) - HTMX/Alpine.js
-- [patterns/testing.md](patterns/testing.md) - Testing guide
-- [patterns/deployment.md](patterns/deployment.md) - Deployment
+| Pattern | Description |
+|---------|-------------|
+| [module-system.md](patterns/module-system.md) | Module interfaces, loading |
+| [mvc.md](patterns/mvc.md) | Fat models, thin controllers |
+| [database.md](patterns/database.md) | GORM, migrations |
+| [auth.md](patterns/auth.md) | Sessions, groups |
+| [frontend.md](patterns/frontend.md) | HTMX, CSS-first, minimal Alpine |
+| [htmx.md](patterns/htmx.md) | Server-driven UI patterns |
+| [i18n.md](patterns/i18n.md) | JSON translations |
+| [security.md](patterns/security.md) | CSRF, rate limiting |
+| [audit.md](patterns/audit.md) | Created/updated tracking |
+| [typing.md](patterns/typing.md) | Go type patterns |
+| [testing.md](patterns/testing.md) | Testing guide |
+| [deployment.md](patterns/deployment.md) | Docker, production |
 
 ## License
 

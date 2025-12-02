@@ -1,0 +1,77 @@
+{{define "title"}}Items - ModuleName{{end}}
+
+{{define "styles"}}
+<style>
+/* Module-specific styles - locality of behavior */
+.modulename-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.modulename-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+.modulename-empty {
+    padding: 3rem;
+    text-align: center;
+    color: #6c757d;
+}
+</style>
+{{end}}
+
+{{define "content"}}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>{{T "Items"}}</h1>
+        <button class="btn btn-primary"
+                hx-get="/modulename/new"
+                hx-target="#modal-container"
+                hx-swap="innerHTML">
+            <i class="fas fa-plus me-1"></i> {{T "Add Item"}}
+        </button>
+    </div>
+
+    <div id="item-list">
+        {{if .items}}
+        <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+            {{range .items}}
+            <div class="col" id="item-{{.ID}}">
+                <div class="card modulename-card h-100">
+                    <div class="card-body">
+                        <h5 class="card-title">{{.Name}}</h5>
+                        {{if .Description}}
+                        <p class="card-text text-muted">{{.Description}}</p>
+                        {{end}}
+                    </div>
+                    <div class="card-footer bg-transparent border-0">
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-primary"
+                                    hx-get="/modulename/{{.ID}}/edit"
+                                    hx-target="#modal-container"
+                                    hx-swap="innerHTML">
+                                <i class="fas fa-edit"></i> {{T "Edit"}}
+                            </button>
+                            <button class="btn btn-outline-danger"
+                                    hx-delete="/modulename/{{.ID}}"
+                                    hx-target="#item-{{.ID}}"
+                                    hx-swap="outerHTML"
+                                    hx-confirm="{{T "Are you sure you want to delete this item?"}}">
+                                <i class="fas fa-trash"></i> {{T "Delete"}}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {{end}}
+        </div>
+        {{else}}
+        <div class="modulename-empty">
+            <i class="fas fa-inbox fa-3x mb-3"></i>
+            <p>{{T "No items yet. Create your first one!"}}</p>
+        </div>
+        {{end}}
+    </div>
+</div>
+
+<!-- Modal container for HTMX -->
+<div id="modal-container"></div>
+{{end}}
