@@ -1,653 +1,369 @@
-# Frontend Patterns
+# Frontend Architecture
 
-> Bootstrap 5 + Alpine.js + HTMX for modern server-rendered UIs.
+> Bootstrap 5 + HTMX. No build pipeline.
 
 ---
 
 ## Table of Contents
 
 - [Philosophy](#philosophy)
-- [Tech Stack](#tech-stack)
-- [Alpine.js Patterns](#alpinejs-patterns)
-- [HTMX Patterns](#htmx-patterns)
-- [Combining Alpine.js and HTMX](#combining-alpinejs-and-htmx)
-- [Bootstrap Integration](#bootstrap-integration)
-- [CSS Organization](#css-organization)
-- [Template Structure](#template-structure)
+- [File Structure](#file-structure)
+- [Bootstrap Setup](#bootstrap-setup)
+- [CSS Customization](#css-customization)
+- [Component Patterns](#component-patterns)
+- [Responsive Design](#responsive-design)
+- [RTL Support](#rtl-support)
 - [Accessibility](#accessibility)
 
 ---
 
 ## Philosophy
 
-**No build pipeline. No npm. No webpack.**
+### Core Principles
 
-- Server-rendered HTML with progressive enhancement
-- Alpine.js for reactive client-side state
-- HTMX for server-driven updates without page reloads
-- Bootstrap 5 for consistent styling
-- CDN-loaded libraries, no bundling required
+- ✅ **Reuse Bootstrap classes** - Never invent custom classes
+- ✅ **One app.css** - Brand overrides only (~50-100 lines)
+- ✅ **No build pipeline** - No npm, webpack, vite
+- ✅ **HTMX for interactivity** - No custom JavaScript
+- ✅ **Progressive enhancement** - Works without JS
 
----
+### What We Avoid
 
-## Tech Stack
-
-| Library | Version | Purpose |
-|---------|---------|---------|
-| Bootstrap | 5.2+ | CSS framework, components |
-| Alpine.js | 3.x | Reactive state, DOM manipulation |
-| HTMX | 1.9+ | Server-driven updates, AJAX |
-| FontAwesome | 6.x | Icons |
-
-### Loading in base.html
-
-```html
-<!-- In modules/core/views/templates/base.html -->
-<head>
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
-
-    <!-- FontAwesome -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-
-    <!-- Module CSS -->
-    <link href="{{ url_for('static', filename='css/base.css') }}" rel="stylesheet">
-</head>
-<body>
-    <!-- Content -->
-
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
-
-    <!-- Alpine.js -->
-    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
-
-    <!-- HTMX -->
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-</body>
-```
+- ❌ Custom CSS frameworks
+- ❌ Tailwind (requires build step)
+- ❌ JavaScript frameworks (React, Vue, etc.)
+- ❌ CSS-in-JS
+- ❌ Sass/Less compilation
 
 ---
 
-## Alpine.js Patterns
+## File Structure
 
-Alpine.js handles reactive client-side state without a build step.
-
-### Basic Component
-
-```html
-<div x-data="{ open: false }">
-    <button @click="open = !open">Toggle</button>
-    <div x-show="open">
-        Content here
-    </div>
-</div>
+```
+app/static/
+├── css/
+│   ├── bootstrap.min.css      # Vendored, version-locked
+│   ├── bootstrap.rtl.min.css  # RTL version (optional)
+│   └── app.css                # Brand overrides (~50 lines)
+├── js/
+│   ├── htmx.min.js            # Vendored
+│   ├── bootstrap.bundle.min.js # Vendored (includes Popper)
+│   └── app.js                 # Rarely needed (<20 lines)
+└── img/
+    ├── logo.svg
+    └── favicon.ico
 ```
 
-### State Management
+### Vendoring Libraries
 
-```html
-<div x-data="{
-    state: 'loading',
-    items: [],
-    error: null,
+Download and commit to repo (no CDN dependency):
 
-    async fetchItems() {
-        this.state = 'loading';
-        try {
-            const response = await fetch('/api/items');
-            this.items = await response.json();
-            this.state = 'loaded';
-        } catch (e) {
-            this.error = e.message;
-            this.state = 'error';
-        }
-    }
-}" x-init="fetchItems()">
+```bash
+# Bootstrap 5.3
+curl -o app/static/css/bootstrap.min.css https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css
+curl -o app/static/js/bootstrap.bundle.min.js https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js
 
-    <!-- Loading state -->
-    <div x-show="state === 'loading'">
-        <i class="fas fa-spinner fa-spin"></i> Loading...
-    </div>
-
-    <!-- Loaded state -->
-    <div x-show="state === 'loaded'">
-        <template x-for="item in items" :key="item.id">
-            <div x-text="item.name"></div>
-        </template>
-    </div>
-
-    <!-- Error state -->
-    <div x-show="state === 'error'" class="alert alert-danger" x-text="error"></div>
-</div>
-```
-
-### Common Directives
-
-| Directive | Purpose | Example |
-|-----------|---------|---------|
-| `x-data` | Define component state | `x-data="{ open: false }"` |
-| `x-show` | Toggle visibility (CSS) | `x-show="open"` |
-| `x-if` | Conditional rendering (DOM) | `x-if="items.length > 0"` |
-| `x-text` | Set text content | `x-text="message"` |
-| `x-model` | Two-way binding | `x-model="search"` |
-| `x-bind` or `:` | Bind attribute | `:class="{ active: isActive }"` |
-| `x-on` or `@` | Event listener | `@click="handleClick"` |
-| `x-for` | Loop | `x-for="item in items"` |
-| `x-init` | Run on init | `x-init="fetchData()"` |
-
-### Form Handling
-
-```html
-<form x-data="{
-    name: '',
-    email: '',
-    submitting: false,
-
-    async submit() {
-        this.submitting = true;
-        await fetch('/api/submit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: this.name, email: this.email })
-        });
-        this.submitting = false;
-    }
-}" @submit.prevent="submit">
-
-    <input type="text" x-model="name" class="form-control" placeholder="Name">
-    <input type="email" x-model="email" class="form-control" placeholder="Email">
-
-    <button type="submit" class="btn btn-primary" :disabled="submitting">
-        <span x-show="!submitting">Submit</span>
-        <span x-show="submitting"><i class="fas fa-spinner fa-spin"></i></span>
-    </button>
-</form>
-```
-
-### Computed Properties
-
-```html
-<div x-data="{
-    items: [],
-    search: '',
-
-    get filteredItems() {
-        return this.items.filter(i =>
-            i.name.toLowerCase().includes(this.search.toLowerCase())
-        );
-    },
-
-    get itemCount() {
-        return this.filteredItems.length;
-    }
-}">
-    <input type="text" x-model="search" placeholder="Search...">
-    <p>Showing <span x-text="itemCount"></span> items</p>
-    <template x-for="item in filteredItems">
-        <div x-text="item.name"></div>
-    </template>
-</div>
-```
-
-### Real Example: Weather Component
-
-From the weather module:
-
-```html
-<div class="weather-card"
-     x-data="{
-         state: 'loading',
-         city: 'Minneapolis',
-         weather: {},
-         errorMessage: '',
-
-         async lookupWeather() {
-             this.state = 'loading';
-             try {
-                 const response = await fetch('/weather/lookup', {
-                     method: 'POST',
-                     headers: { 'Content-Type': 'application/json' },
-                     body: JSON.stringify({ city: this.city })
-                 });
-                 const data = await response.json();
-                 if (data.error) {
-                     this.errorMessage = data.error;
-                     this.state = 'error';
-                 } else {
-                     this.weather = data;
-                     this.state = 'data';
-                 }
-             } catch (e) {
-                 this.errorMessage = 'Failed to fetch weather';
-                 this.state = 'error';
-             }
-         },
-
-         get weatherIconClass() {
-             const iconMap = {
-                 '01d': 'sun', '01n': 'moon',
-                 '02d': 'cloud-sun', '02n': 'cloud-moon',
-                 '03d': 'cloud', '04d': 'cloud',
-                 '09d': 'cloud-showers-heavy',
-                 '10d': 'cloud-rain',
-                 '11d': 'bolt',
-                 '13d': 'snowflake',
-                 '50d': 'smog'
-             };
-             return `fas fa-${iconMap[this.weather.icon] || 'question'}`;
-         }
-     }"
-     x-init="lookupWeather()">
-
-    <div class="search-box">
-        <input type="text"
-               x-model="city"
-               @keyup.enter="lookupWeather()"
-               placeholder="Enter city name">
-        <button @click="lookupWeather()" class="btn btn-primary">
-            <i class="fas fa-search"></i>
-        </button>
-    </div>
-
-    <!-- Loading -->
-    <div x-show="state === 'loading'" class="text-center">
-        <i class="fas fa-spinner fa-spin fa-2x"></i>
-    </div>
-
-    <!-- Data -->
-    <div x-show="state === 'data'">
-        <i :class="weatherIconClass" class="weather-icon"></i>
-        <div class="temperature" x-text="`${Math.round(weather.temp)}°F`"></div>
-        <div class="description" x-text="weather.description"></div>
-    </div>
-
-    <!-- Error -->
-    <div x-show="state === 'error'" class="alert alert-danger" x-text="errorMessage"></div>
-</div>
+# HTMX
+curl -o app/static/js/htmx.min.js https://unpkg.com/htmx.org@1.9.10/dist/htmx.min.js
 ```
 
 ---
 
-## HTMX Patterns
+## Bootstrap Setup
 
-HTMX enables server-driven updates without full page reloads.
-
-### Basic Patterns
+### Base Layout
 
 ```html
-<!-- GET request, replace target -->
-<button hx-get="/items/list"
-        hx-target="#item-list"
-        hx-swap="innerHTML">
-    Load Items
-</button>
-<div id="item-list"></div>
-
-<!-- POST form -->
-<form hx-post="/items/add"
-      hx-target="#item-list"
-      hx-swap="beforeend">
-    <input type="text" name="name">
-    <button type="submit">Add</button>
-</form>
-
-<!-- DELETE with confirmation -->
-<button hx-delete="/items/1"
-        hx-confirm="Are you sure?"
-        hx-target="closest .item"
-        hx-swap="outerHTML">
-    Delete
-</button>
-```
-
-### Common Attributes
-
-| Attribute | Purpose | Example |
-|-----------|---------|---------|
-| `hx-get` | GET request | `hx-get="/items"` |
-| `hx-post` | POST request | `hx-post="/items/add"` |
-| `hx-put` | PUT request | `hx-put="/items/1"` |
-| `hx-delete` | DELETE request | `hx-delete="/items/1"` |
-| `hx-target` | Response target | `hx-target="#container"` |
-| `hx-swap` | How to swap content | `hx-swap="innerHTML"` |
-| `hx-trigger` | Event trigger | `hx-trigger="click"` |
-| `hx-confirm` | Confirmation dialog | `hx-confirm="Delete?"` |
-| `hx-indicator` | Loading indicator | `hx-indicator="#spinner"` |
-
-### Swap Options
-
-| Value | Description |
-|-------|-------------|
-| `innerHTML` | Replace inner HTML (default) |
-| `outerHTML` | Replace entire element |
-| `beforeend` | Append inside element |
-| `afterend` | Insert after element |
-| `beforebegin` | Insert before element |
-| `none` | Don't swap (for side effects) |
-
-### Modal Pattern
-
-```html
-<!-- Trigger button -->
-<button hx-get="{{ url_for('yourmodule_bp.modal_new') }}"
-        hx-target="#modals"
-        hx-swap="innerHTML"
-        class="btn btn-primary">
-    New Item
-</button>
-
-<!-- Modal container -->
-<div id="modals"></div>
-```
-
-**Controller:**
-
-```python
-@blueprint.route("/modal/new")
-@login_required
-def modal_new():
-    """Return modal HTML fragment."""
-    return render_template("yourmodule/partials/_modal.html")
-```
-
-**Modal template:**
-
-```html
-<!-- partials/_modal.html -->
-<div class="modal fade show" style="display: block;" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">{{ _("New Item") }}</h5>
-                <button type="button"
-                        hx-get="{{ url_for('yourmodule_bp.clear_modal') }}"
-                        hx-target="#modals"
-                        class="btn-close"></button>
-            </div>
-            <form hx-post="{{ url_for('yourmodule_bp.create') }}"
-                  hx-target="body"
-                  hx-swap="none">
-                <div class="modal-body">
-                    <input type="text" name="name" class="form-control" required>
-                </div>
-                <div class="modal-footer">
-                    <button type="submit" class="btn btn-primary">
-                        {{ _("Save") }}
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-<div class="modal-backdrop fade show"></div>
-```
-
-**Clear modal route:**
-
-```python
-@blueprint.route("/modal/clear")
-def clear_modal():
-    """Clear modal container."""
-    return ""
-```
-
-### HTMX Redirect Pattern
-
-For redirecting after form submission:
-
-```python
-from flask import make_response, url_for
-
-@blueprint.route("/create", methods=["POST"])
-@login_required
-def create():
-    """Create item and redirect."""
-    name = request.form.get("name")
-    Item.create(name)
-
-    # Return HX-Redirect header
-    response = make_response()
-    response.headers["HX-Redirect"] = url_for("yourmodule_bp.index")
-    return response
-```
-
-### Inline Editing Pattern
-
-```html
-<!-- View mode -->
-<div id="item-{{ item.id }}" class="item-row">
-    <span>{{ item.name }}</span>
-    <button hx-get="{{ url_for('yourmodule_bp.edit_form', id=item.id) }}"
-            hx-target="#item-{{ item.id }}"
-            hx-swap="outerHTML"
-            class="btn btn-sm btn-outline-primary">
-        Edit
-    </button>
-</div>
-```
-
-**Edit form partial:**
-
-```html
-<!-- partials/_edit_form.html -->
-<form id="item-{{ item.id }}"
-      hx-put="{{ url_for('yourmodule_bp.update', id=item.id) }}"
-      hx-target="#item-{{ item.id }}"
-      hx-swap="outerHTML"
-      class="item-row">
-    <input type="text" name="name" value="{{ item.name }}" class="form-control">
-    <button type="submit" class="btn btn-sm btn-success">Save</button>
-    <button type="button"
-            hx-get="{{ url_for('yourmodule_bp.item_row', id=item.id) }}"
-            hx-target="#item-{{ item.id }}"
-            hx-swap="outerHTML"
-            class="btn btn-sm btn-outline-secondary">
-        Cancel
-    </button>
-</form>
-```
-
----
-
-## Combining Alpine.js and HTMX
-
-Use Alpine.js for client-side state, HTMX for server communication.
-
-### Search with Debounce
-
-```html
-<div x-data="{ search: '' }">
-    <input type="text"
-           x-model="search"
-           hx-get="/items/search"
-           hx-trigger="input changed delay:300ms"
-           hx-target="#results"
-           :hx-vals="JSON.stringify({ q: search })"
-           placeholder="Search...">
-
-    <div id="results"></div>
-</div>
-```
-
-### Toggle with Server Sync
-
-```html
-<div x-data="{ expanded: false }">
-    <button @click="expanded = !expanded"
-            :hx-get="expanded ? '/details/collapse' : '/details/expand'"
-            hx-target="#details"
-            hx-swap="innerHTML">
-        <span x-show="!expanded">Show Details</span>
-        <span x-show="expanded">Hide Details</span>
-    </button>
-
-    <div id="details" x-show="expanded"></div>
-</div>
-```
-
----
-
-## Bootstrap Integration
-
-### Standard Components
-
-```html
-<!-- Card -->
-<div class="card">
-    <div class="card-header">Header</div>
-    <div class="card-body">
-        <h5 class="card-title">Title</h5>
-        <p class="card-text">Content</p>
-    </div>
-</div>
-
-<!-- List Group -->
-<ul class="list-group">
-    {% for item in items %}
-    <li class="list-group-item d-flex justify-content-between align-items-center">
-        {{ item.name }}
-        <span class="badge bg-primary">{{ item.count }}</span>
-    </li>
-    {% endfor %}
-</ul>
-
-<!-- Alert -->
-<div class="alert alert-success alert-dismissible fade show">
-    {{ message }}
-    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-</div>
-```
-
-### Flash Messages
-
-```html
-<!-- In base.html -->
-{% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-        {% for category, message in messages %}
-        <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show">
-            {{ message }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-        {% endfor %}
-    {% endif %}
-{% endwith %}
-```
-
----
-
-## CSS Organization
-
-### Module CSS Location
-
-```
-modules/yourmodule/views/assets/css/
-└── yourmodule.css
-```
-
-### CSS Variables for Theming
-
-Each module has a color defined in its manifest. This is used for theming:
-
-```css
-/* In base.css */
-:root {
-    --module-color: #6c757d;  /* Default */
-}
-
-body {
-    --module-color: {{ g.current_module.color|default('#6c757d') }};
-}
-
-/* Use the variable */
-.module-header {
-    background-color: var(--module-color);
-}
-```
-
-### Keep CSS Minimal
-
-- Use Bootstrap classes first
-- Only write custom CSS when Bootstrap doesn't cover it
-- Keep module CSS under 100 lines
-
-```css
-/* modules/yourmodule/views/assets/css/yourmodule.css */
-
-/* Module-specific styles only */
-.yourmodule-card {
-    border-left: 4px solid var(--module-color);
-}
-
-.yourmodule-icon {
-    font-size: 2rem;
-    color: var(--module-color);
-}
-```
-
----
-
-## Template Structure
-
-### Base Template Blocks
-
-```html
-<!-- modules/core/views/templates/base.html -->
+<!-- app/views/layouts/base.html -->
 <!DOCTYPE html>
-<html lang="{{ g.lang }}">
+<html lang="{{ lang }}" dir="{{ 'rtl' if is_rtl else 'ltr' }}">
 <head>
-    <title>{% block title %}My App{% endblock %}</title>
-    {% block head %}{% endblock %}
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Your App{% endblock %}</title>
+
+  <!-- Bootstrap CSS -->
+  {% if is_rtl %}
+  <link href="/static/css/bootstrap.rtl.min.css" rel="stylesheet">
+  {% else %}
+  <link href="/static/css/bootstrap.min.css" rel="stylesheet">
+  {% endif %}
+
+  <!-- Brand overrides -->
+  <link href="/static/css/app.css" rel="stylesheet">
+
+  <!-- HTMX -->
+  <script src="/static/js/htmx.min.js"></script>
 </head>
-<body style="--module-color: {{ g.current_module.color|default('#6c757d') }}">
-    {% include "header.html" %}
+<body class="bg-light">
+  {% include 'partials/_navbar.html' %}
 
-    <main>
-        {% block content %}{% endblock %}
-    </main>
+  <main class="container py-4">
+    {% block content %}{% endblock %}
+  </main>
 
-    {% block scripts %}{% endblock %}
+  <!-- Bootstrap JS (includes Popper) -->
+  <script src="/static/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
 ```
 
-### Module Template
+---
+
+## CSS Customization
+
+### app.css Template
+
+```css
+/* app/static/css/app.css */
+/* Brand overrides only - keep under 100 lines */
+
+/* ============================================
+   CSS Variables (Brand Colors)
+   ============================================ */
+:root {
+  --bs-primary: #6366f1;      /* Indigo */
+  --bs-primary-rgb: 99, 102, 241;
+
+  /* Typography */
+  --bs-font-sans-serif: 'Inter', system-ui, -apple-system, sans-serif;
+
+  /* Border radius */
+  --bs-border-radius: 0.5rem;
+  --bs-border-radius-lg: 0.75rem;
+}
+
+/* ============================================
+   Component Tweaks (<5 lines each)
+   ============================================ */
+
+/* Primary button uses brand color */
+.btn-primary {
+  --bs-btn-bg: var(--bs-primary);
+  --bs-btn-border-color: var(--bs-primary);
+}
+
+/* Navbar brand */
+.navbar-brand {
+  font-weight: 600;
+}
+
+/* Card shadows */
+.card {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* ============================================
+   HTMX Loading Indicator
+   ============================================ */
+.htmx-indicator {
+  display: none;
+}
+
+.htmx-request .htmx-indicator {
+  display: inline-block;
+}
+
+.htmx-request.htmx-indicator {
+  display: inline-block;
+}
+```
+
+### What NOT to Put in app.css
+
+```css
+/* ❌ DON'T: Custom utility classes */
+.mt-custom { margin-top: 23px; }
+
+/* ❌ DON'T: Component-specific styles */
+.user-card-special { ... }
+
+/* ❌ DON'T: Overriding Bootstrap internals */
+.btn { all: unset; }
+
+/* ❌ DON'T: Media queries (use Bootstrap's) */
+@media (max-width: 768px) { ... }
+```
+
+---
+
+## Component Patterns
+
+### Cards
 
 ```html
-<!-- modules/yourmodule/views/templates/yourmodule/index.html -->
-{% extends "base.html" %}
-
-{% block title %}{{ _("Your Module") }} - My App{% endblock %}
-
-{% block content %}
-<div class="container mt-4">
-    <h1>{{ _("Your Module") }}</h1>
-    <!-- Content here -->
+<div class="card">
+  <div class="card-header">
+    <h5 class="mb-0">Title</h5>
+  </div>
+  <div class="card-body">
+    <p>Content here</p>
+  </div>
+  <div class="card-footer text-end">
+    <button class="btn btn-primary">Save</button>
+  </div>
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-    // Module-specific JavaScript if needed
-</script>
-{% endblock %}
 ```
 
-### Partials Naming Convention
+### Forms
 
-- Prefix with underscore: `_modal.html`, `_list.html`
-- Place in `partials/` subfolder
-- Keep partials focused on single responsibility
+```html
+<form>
+  <div class="mb-3">
+    <label for="email" class="form-label">Email</label>
+    <input type="email" class="form-control" id="email" name="email">
+    <div class="form-text">We'll never share your email.</div>
+  </div>
 
+  <div class="mb-3">
+    <label for="theme" class="form-label">Theme</label>
+    <select class="form-select" id="theme" name="theme">
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+    </select>
+  </div>
+
+  <div class="form-check form-switch mb-3">
+    <input class="form-check-input" type="checkbox" id="notifications">
+    <label class="form-check-label" for="notifications">
+      Email notifications
+    </label>
+  </div>
+
+  <button type="submit" class="btn btn-primary">Save</button>
+</form>
 ```
-views/templates/yourmodule/
-├── index.html
-├── detail.html
-└── partials/
-    ├── _list.html
-    ├── _modal.html
-    └── _form.html
+
+### Alerts
+
+```html
+<!-- Flash messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for category, message in messages %}
+  <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show">
+    {{ message }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
+  {% endfor %}
+{% endwith %}
+```
+
+### Navbar
+
+```html
+<nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom">
+  <div class="container">
+    <a class="navbar-brand" href="/">Your App</a>
+
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="collapse navbar-collapse" id="navbarNav">
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item">
+          <a class="nav-link" href="/">Home</a>
+        </li>
+      </ul>
+
+      <ul class="navbar-nav">
+        {% if current_user.is_authenticated %}
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+            {{ current_user.name }}
+          </a>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item" href="/profile">Profile</a></li>
+            <li><a class="dropdown-item" href="/settings">Settings</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li>
+              <form action="/logout" method="POST">
+                <button type="submit" class="dropdown-item">Logout</button>
+              </form>
+            </li>
+          </ul>
+        </li>
+        {% else %}
+        <li class="nav-item">
+          <a class="nav-link" href="/login">Login</a>
+        </li>
+        {% endif %}
+      </ul>
+    </div>
+  </div>
+</nav>
+```
+
+---
+
+## Responsive Design
+
+### Grid System
+
+```html
+<!-- Two columns on md+, single column on mobile -->
+<div class="row">
+  <div class="col-12 col-md-6">Column 1</div>
+  <div class="col-12 col-md-6">Column 2</div>
+</div>
+
+<!-- Centered content -->
+<div class="row justify-content-center">
+  <div class="col-12 col-md-8 col-lg-6">
+    Centered content
+  </div>
+</div>
+```
+
+### Breakpoints
+
+| Breakpoint | Class infix | Dimensions |
+|------------|-------------|------------|
+| Extra small | (none) | <576px |
+| Small | `sm` | ≥576px |
+| Medium | `md` | ≥768px |
+| Large | `lg` | ≥992px |
+| Extra large | `xl` | ≥1200px |
+| XXL | `xxl` | ≥1400px |
+
+### Hide/Show by Breakpoint
+
+```html
+<!-- Hide on mobile -->
+<div class="d-none d-md-block">Desktop only</div>
+
+<!-- Show only on mobile -->
+<div class="d-md-none">Mobile only</div>
+```
+
+---
+
+## RTL Support
+
+### Detection
+
+```html
+<html lang="{{ lang }}" dir="{{ 'rtl' if is_rtl else 'ltr' }}">
+```
+
+### Bootstrap RTL
+
+```html
+{% if is_rtl %}
+<link href="/static/css/bootstrap.rtl.min.css" rel="stylesheet">
+{% else %}
+<link href="/static/css/bootstrap.min.css" rel="stylesheet">
+{% endif %}
+```
+
+### Manual Fixes (if needed)
+
+```css
+/* app.css - RTL fixes */
+[dir="rtl"] .me-3 {
+  margin-left: 1rem !important;
+  margin-right: 0 !important;
+}
 ```
 
 ---
@@ -657,37 +373,47 @@ views/templates/yourmodule/
 ### Semantic HTML
 
 ```html
+<!-- Use semantic elements -->
 <nav>...</nav>
 <main>...</main>
 <footer>...</footer>
 
+<!-- Proper headings hierarchy -->
 <h1>Page Title</h1>
 <h2>Section</h2>
+<h3>Subsection</h3>
 ```
 
 ### ARIA Labels
 
 ```html
+<!-- Buttons with icons -->
 <button class="btn btn-danger" aria-label="Delete item">
-    <i class="fas fa-trash"></i>
+  <svg>...</svg>
 </button>
 
+<!-- Loading state -->
 <button class="btn btn-primary" disabled aria-busy="true">
-    <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-    Loading...
+  <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+  Loading...
 </button>
 ```
 
 ### Focus Management
 
 ```html
+<!-- Skip link -->
 <a href="#main-content" class="visually-hidden-focusable">
-    Skip to main content
+  Skip to main content
 </a>
 
 <main id="main-content">...</main>
 ```
 
+### Color Contrast
+
+Use Bootstrap's default colors - they meet WCAG AA standards.
+
 ---
 
-**Next:** [Module System](module-system.md) | [i18n](i18n.md) | [Auth](auth.md)
+**Next:** [HTMX Patterns](htmx.md) | [Security](security.md)

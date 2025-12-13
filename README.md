@@ -1,6 +1,6 @@
-# Flask Blueprint
+# Blueprint-Python
 
-> Documentation blueprint for building production-ready Flask applications with modular architecture and MVC pattern.
+> Documentation blueprint for building production-ready Flask SaaS applications with MVC pattern.
 
 ## What is This?
 
@@ -55,7 +55,7 @@ blueprint-python/
 
 ```bash
 # Add to your project
-git submodule add [your-repo-url] blueprint
+git submodule add https://github.com/yourorg/blueprint-python.git blueprint
 
 # Point Claude to it
 # In your project's CLAUDE.md:

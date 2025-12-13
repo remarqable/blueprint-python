@@ -1,142 +1,185 @@
 # Database Patterns
 
-> SQLAlchemy with ModelRegistry, module-scoped models, and query patterns.
+> SQLAlchemy, Alembic migrations, PostgreSQL/SQLite patterns
 
 ---
 
 ## Table of Contents
 
-- [Database Setup](#database-setup)
-- [ModelRegistry Pattern](#modelregistry-pattern)
+- [Database Choice](#database-choice)
+- [SQLAlchemy Setup](#sqlalchemy-setup)
+- [Migrations with Alembic](#migrations-with-alembic)
 - [Model Conventions](#model-conventions)
 - [Query Patterns](#query-patterns)
-- [Sample Data Pattern](#sample-data-pattern)
-- [Relationships](#relationships)
 - [Transactions](#transactions)
+- [JSONB Columns](#jsonb-columns-postgresql)
+- [Full-Text Search](#full-text-search-postgresql)
 - [Multi-Tenancy](#multi-tenancy)
 - [Performance](#performance)
 
 ---
 
-## Database Setup
+## Database Choice
 
 ### SQLite (Default)
 
-SQLite is the default - no setup required. Database file created at `app.db`.
+SQLite is the default - no setup required. The database file is created automatically.
 
-```python
-# In app.py
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "app.db"
-)
+```bash
+# DATABASE_URL format
+sqlite:///app.db
+
+# In-memory (for testing)
+sqlite:///:memory:
 ```
 
 **SQLite works great for:**
 - Development and prototyping
 - Small to medium production apps
 - Single-server deployments
+- Apps with <100 concurrent users
 
-### Database Instance
+### PostgreSQL (Optional - When You Need It)
 
-The SQLAlchemy instance is centralized in the system layer:
+Add PostgreSQL when you need:
+- JSONB columns for flexible data
+- Full-text search
+- Row-level security (multi-tenancy)
+- High concurrency (100+ users)
+- Horizontal scaling
 
-```python
-# system/db/database.py
-from flask_sqlalchemy import SQLAlchemy
+```bash
+# Install driver
+pip install psycopg2-binary
 
-db = SQLAlchemy()
+# Start PostgreSQL
+docker run --name app-db \
+  -e POSTGRES_USER=app \
+  -e POSTGRES_PASSWORD=app \
+  -e POSTGRES_DB=app \
+  -p 5432:5432 -d postgres:15-alpine
+
+# Update DATABASE_URL
+export DATABASE_URL="postgresql://app:app@localhost:5432/app"
 ```
 
-All modules import from this location:
+**Migration path:** Start with SQLite, switch to PostgreSQL when needed. SQLAlchemy makes this seamless - just change `DATABASE_URL`.
+
+---
+
+## SQLAlchemy Setup
+
+### Extensions Configuration
 
 ```python
-from system.db.database import db
+# app/extensions.py
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+
+db = SQLAlchemy()
+migrate = Migrate()
+```
+
+### Config with Engine Options
+
+```python
+# app/config.py
+import os
+
+class Config:
+    DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
+    SQLALCHEMY_DATABASE_URI = DATABASE_URL
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # PostgreSQL-specific options
+    if DATABASE_URL.startswith('postgresql'):
+        SQLALCHEMY_ENGINE_OPTIONS = {
+            'pool_size': 5,
+            'max_overflow': 10,
+            'pool_timeout': 30,
+            'pool_recycle': 300,
+            'pool_pre_ping': True,
+        }
 ```
 
 ---
 
-## ModelRegistry Pattern
+## Migrations with Alembic
 
-Blueprint uses `@ModelRegistry.register` to track all models across modules.
+### Initialize Migrations
 
-### Basic Usage
+```bash
+# First time setup
+flask db init
+
+# Create migration
+flask db migrate -m "Create user table"
+
+# Apply migration
+flask db upgrade
+
+# Rollback
+flask db downgrade
+```
+
+### Migration Example
 
 ```python
-# modules/yourmodule/models/item.py
-from system.db.database import db
-from system.db.decorators import ModelRegistry
+# migrations/versions/001_create_user_table.py
+"""Create user table
+
+Revision ID: 001
+"""
+from alembic import op
+import sqlalchemy as sa
+
+revision = '001'
+down_revision = None
 
 
-@ModelRegistry.register
-class Item(db.Model):
-    __tablename__ = "item"
+def upgrade():
+    op.create_table(
+        'user',
+        sa.Column('id', sa.BigInteger(), primary_key=True),
+        sa.Column('email', sa.String(255), unique=True, nullable=False),
+        sa.Column('name', sa.String(100), nullable=False),
+        sa.Column('avatar_url', sa.String(500), nullable=True),
+        sa.Column('is_active', sa.Boolean(), default=True),
+        sa.Column('created_at', sa.DateTime(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), nullable=False),
+    )
+    op.create_index('ix_user_email', 'user', ['email'])
 
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(255), nullable=False)
+
+def downgrade():
+    op.drop_table('user')
 ```
 
-### Association Tables
-
-For many-to-many relationships:
+### Demo Data
 
 ```python
-# modules/core/models/user_group.py
-from system.db.database import db
-from system.db.decorators import ModelRegistry
+# migrations/versions/999_demo_data.py
+"""Load demo data for development/testing"""
 
-user_group = db.Table(
-    "user_group",
-    db.Column("user_id", db.Integer, db.ForeignKey("user.id")),
-    db.Column("group_id", db.Integer, db.ForeignKey("group.id")),
-    db.UniqueConstraint("user_id", "group_id"),
-)
+from alembic import op
+from datetime import datetime
 
-# Register with explicit module name
-ModelRegistry.register_table(user_group, "core")
-```
+revision = '999'
+down_revision = '001'
 
-### Registry Output
 
-On startup, the registry prints a summary:
+def upgrade():
+    # Insert demo users
+    op.execute("""
+        INSERT INTO "user" (email, name, is_active, created_at, updated_at)
+        VALUES
+            ('alice@example.com', 'Alice', true, NOW(), NOW()),
+            ('bob@example.com', 'Bob', true, NOW(), NOW())
+    """)
 
-```
-Database Model Registry:
---------   ----------   --------------------
-Module     Model        Table
---------   ----------   --------------------
-core       User         user
-core       Group        group
-core       user_group   user_group
-tasks      Task         task
-```
 
-### Registry Internals
-
-```python
-# system/db/decorators.py
-class ModelRegistry:
-    models = []
-    registration_order = 1
-    MODULE_ORDER = ["core"]  # Only core is required
-
-    @classmethod
-    def register(cls, model_class):
-        """Decorator to register a model."""
-        # Extract module name from path
-        module_path = model_class.__module__.split(".")
-        if "modules" in module_path:
-            module_name = module_path[module_path.index("modules") + 1]
-        else:
-            module_name = "core"
-
-        cls.models.append({
-            "module": module_name,
-            "model": model_class.__name__,
-            "table": model_class.__tablename__,
-            "order": cls.registration_order,
-        })
-        cls.registration_order += 1
-        return model_class
+def downgrade():
+    op.execute("DELETE FROM \"user\" WHERE email IN ('alice@example.com', 'bob@example.com')")
 ```
 
 ---
@@ -145,89 +188,37 @@ class ModelRegistry:
 
 ### Naming
 
-- **Tables**: lowercase, singular (`user`, `task`)
-- **Columns**: snake_case (`created_at`, `user_id`, `title`)
-- **Foreign keys**: `<entity>_id` (`user_id`, `group_id`)
-- **Models**: PascalCase, singular (`User`, `Task`)
-- **Tablename**: Always explicit with `__tablename__`
+- **Tables**: lowercase, singular (`user`, `setting`)
+- **Columns**: snake_case (`created_at`, `user_id`)
+- **Foreign keys**: `<entity>_id` (`user_id`, `tenant_id`)
+- **Indexes**: `ix_<table>_<column>` (`ix_user_email`)
 
-### Standard Model Structure
+### Base Model
 
 ```python
-# modules/yourmodule/models/item.py
-from system.db.database import db
-from system.db.decorators import ModelRegistry
+# app/models/base.py
+from datetime import datetime
+from app.extensions import db
 
 
-@ModelRegistry.register
-class Item(db.Model):
-    __tablename__ = "item"
+class BaseModel(db.Model):
+    __abstract__ = True
 
-    # --- Columns ---
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(255), nullable=False)
-    description = db.Column(db.Text)
-    is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
-    updated_at = db.Column(db.DateTime, onupdate=db.func.current_timestamp())
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
 
-    # --- Relationships ---
-    # user = db.relationship("User", backref="items")
-
-    # --- Class Methods (CRUD) ---
-    @classmethod
-    def create(cls, name, description=None):
-        """Create a new item."""
-        item = cls(name=name, description=description)
-        db.session.add(item)
+    def save(self):
+        if hasattr(self, 'validate'):
+            self.validate()
+        db.session.add(self)
         db.session.commit()
-        return item
+        return self
 
-    @classmethod
-    def get_all(cls):
-        """Get all items."""
-        return cls.query.all()
-
-    @classmethod
-    def get_by_id(cls, item_id):
-        """Get item by ID."""
-        return cls.query.get(item_id)
-
-    @classmethod
-    def delete(cls, item_id):
-        """Delete an item."""
-        item = cls.query.get(item_id)
-        if item:
-            db.session.delete(item)
-            db.session.commit()
-            return True
-        return False
-
-    @classmethod
-    def update(cls, item_id, **kwargs):
-        """Update an item."""
-        item = cls.query.get(item_id)
-        if item:
-            for key, value in kwargs.items():
-                if hasattr(item, key):
-                    setattr(item, key, value)
-            db.session.commit()
-            return item
-        return None
-
-    # --- Static Methods ---
-    @staticmethod
-    def get_active():
-        """Get active items."""
-        return Item.query.filter_by(is_active=True).all()
-
-    # --- Sample Data ---
-    @classmethod
-    def create_sample_data(cls):
-        """Create sample data if table is empty."""
-        if not cls.query.first():
-            cls.create("Sample Item 1", "Description 1")
-            cls.create("Sample Item 2", "Description 2")
+    def delete(self):
+        db.session.delete(self)
+        db.session.commit()
 ```
 
 ---
@@ -238,179 +229,67 @@ class Item(db.Model):
 
 ```python
 # Get by ID
-item = Item.query.get(1)
-item = Item.query.get_or_404(1)  # Raises 404 if not found
+user = User.query.get(1)
+user = User.query.get_or_404(1)
 
 # Filter
-item = Item.query.filter_by(name="Test").first()
-items = Item.query.filter(Item.is_active == True).all()
+user = User.query.filter_by(email='alice@example.com').first()
+users = User.query.filter(User.is_active == True).all()
 
 # Order and limit
-items = Item.query.order_by(Item.created_at.desc()).limit(10).all()
+users = User.query.order_by(User.created_at.desc()).limit(10).all()
 
 # Count
-count = Item.query.count()
-
-# First or None
-item = Item.query.filter_by(name="Test").first()
+count = User.query.count()
 ```
 
 ### Pagination
 
 ```python
 @classmethod
-def list_paginated(cls, page=1, per_page=20):
-    """List items with pagination."""
-    return cls.query.order_by(cls.created_at.desc()).paginate(
-        page=page, per_page=per_page, error_out=False
-    )
+def list_paginated(cls, page: int = 1, per_page: int = 20):
+    """List with pagination."""
+    return cls.query.order_by(cls.created_at.desc()) \
+        .paginate(page=page, per_page=per_page, error_out=False)
 
-# Usage
-pagination = Item.list_paginated(page=1)
-items = pagination.items
+# Usage in controller
+pagination = User.list_paginated(page=request.args.get('page', 1, type=int))
+users = pagination.items
 total_pages = pagination.pages
-has_next = pagination.has_next
 ```
 
-### Eager Loading (Avoid N+1)
+### Joins and Relationships
 
 ```python
-# Load related objects in single query
-users = User.query.options(db.joinedload(User.groups)).all()
+# Eager loading (avoid N+1)
+users = User.query.options(db.joinedload(User.settings)).all()
 
-# Multiple relationships
-users = User.query.options(
-    db.joinedload(User.groups),
-    db.joinedload(User.settings)
-).all()
-```
-
----
-
-## Sample Data Pattern
-
-Every model should have a `create_sample_data()` method:
-
-```python
-@classmethod
-def create_sample_data(cls):
-    """Create sample data for development/demo.
-
-    Called from module's init_database() hook.
-    Must be idempotent (safe to call multiple times).
-    """
-    if not cls.query.first():  # Only if table is empty
-        cls.create("Sample 1")
-        cls.create("Sample 2")
-```
-
-**In module.py:**
-
-```python
-@hookimpl
-def init_database(self):
-    """Initialize database."""
-    db.create_all()
-    try:
-        from .models.item import Item
-        Item.create_sample_data()
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Sample data error: {e}")
-```
-
----
-
-## Relationships
-
-### One-to-Many
-
-```python
-# Parent (User)
-@ModelRegistry.register
-class User(db.Model):
-    __tablename__ = "user"
-    id = db.Column(db.Integer, primary_key=True)
-    tasks = db.relationship("Task", backref="user", lazy="dynamic")
-
-
-# Child (Task)
-@ModelRegistry.register
-class Task(db.Model):
-    __tablename__ = "task"
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
-```
-
-### Many-to-Many
-
-```python
-# Association table
-user_group = db.Table(
-    "user_group",
-    db.Column("user_id", db.Integer, db.ForeignKey("user.id")),
-    db.Column("group_id", db.Integer, db.ForeignKey("group.id")),
-)
-ModelRegistry.register_table(user_group, "core")
-
-
-# User model
-@ModelRegistry.register
-class User(db.Model):
-    __tablename__ = "user"
-    groups = db.relationship("Group", secondary=user_group, backref="users")
-
-
-# Group model
-@ModelRegistry.register
-class Group(db.Model):
-    __tablename__ = "group"
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(64), unique=True)
-```
-
-### One-to-One
-
-```python
-# User
-@ModelRegistry.register
-class User(db.Model):
-    __tablename__ = "user"
-    tasks = db.relationship("Task", backref="owner")
-
-
-# Task
-@ModelRegistry.register
-class Task(db.Model):
-    __tablename__ = "task"
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+# Filter by relationship
+users = User.query.join(Setting).filter(Setting.key == 'theme').all()
 ```
 
 ---
 
 ## Transactions
 
-### Automatic Commits
-
-Each model method commits automatically:
+### Automatic (Default)
 
 ```python
-@classmethod
-def create(cls, name):
-    item = cls(name=name)
-    db.session.add(item)
-    db.session.commit()  # Commits here
-    return item
+# Each save() commits automatically
+user = User(email='test@example.com', name='Test')
+user.save()  # Commits here
 ```
 
 ### Manual Transaction
 
 ```python
-def transfer_credits(from_id, to_id, amount):
-    """Atomic credit transfer."""
+from app.extensions import db
+
+def transfer_credits(from_user_id: int, to_user_id: int, amount: int):
+    """Transfer credits between users (atomic operation)."""
     try:
-        from_user = User.query.get(from_id)
-        to_user = User.query.get(to_id)
+        from_user = User.query.get(from_user_id)
+        to_user = User.query.get(to_user_id)
 
         from_user.credits -= amount
         to_user.credits += amount
@@ -425,10 +304,12 @@ def transfer_credits(from_id, to_id, amount):
 
 ```python
 from contextlib import contextmanager
+from app.extensions import db
+
 
 @contextmanager
 def transaction():
-    """Transaction context manager."""
+    """Transaction context manager with auto-rollback."""
     try:
         yield db.session
         db.session.commit()
@@ -445,56 +326,146 @@ with transaction():
 
 ---
 
-## Multi-Tenancy
+## JSONB Columns (PostgreSQL)
 
-### Group-Based Access (Blueprint Default - Single Tenant)
-
-Blueprint uses group-based access control for **single-tenant applications**:
+### Model Definition
 
 ```python
-# User belongs to groups within the same organization
-user.groups  # [ALL, ADMIN, ...]
+from sqlalchemy.dialects.postgresql import JSONB
 
-# Check membership
-if current_user.is_admin:
-    # Admin-only action
+class User(BaseModel):
+    __tablename__ = 'user'
 
-# All users share the same database/organization
-# No tenant_id filtering needed
+    email = db.Column(db.String(255), unique=True, nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    metadata = db.Column(JSONB, default=dict)  # Flexible JSON storage
 ```
 
-**Note:** This pattern assumes all users belong to one organization. Queries don't need tenant isolation.
-
-### User-Owned Data Pattern
+### Querying JSONB
 
 ```python
-@ModelRegistry.register
-class Setting(db.Model):
-    __tablename__ = "user_setting"
+# Filter by JSON key
+users = User.query.filter(User.metadata['role'].astext == 'admin').all()
 
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-    key = db.Column(db.String(255), nullable=False)
-    value = db.Column(db.String(255))
+# Check if key exists
+users = User.query.filter(User.metadata.has_key('verified')).all()
 
-    __table_args__ = (db.UniqueConstraint("user_id", "key"),)
+# Contains
+users = User.query.filter(User.metadata.contains({'active': True})).all()
+```
 
-    @staticmethod
-    def get(user_id, key, default=None):
-        """Get setting for user."""
-        setting = Setting.query.filter_by(user_id=user_id, key=key).first()
-        return setting.value if setting else default
+### JSONB Index (Migration)
 
-    @staticmethod
-    def set(user_id, key, value):
-        """Set setting for user."""
-        setting = Setting.query.filter_by(user_id=user_id, key=key).first()
-        if setting:
-            setting.value = value
-        else:
-            setting = Setting(user_id=user_id, key=key, value=value)
-            db.session.add(setting)
-        db.session.commit()
+```python
+def upgrade():
+    # GIN index for JSONB queries
+    op.execute("""
+        CREATE INDEX ix_user_metadata ON "user"
+        USING GIN (metadata)
+    """)
+```
+
+---
+
+## Full-Text Search (PostgreSQL)
+
+### Model with Search Vector
+
+```python
+from sqlalchemy.dialects.postgresql import TSVECTOR
+
+class Article(BaseModel):
+    __tablename__ = 'article'
+
+    title = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    search_vector = db.Column(TSVECTOR)  # Generated column
+```
+
+### Migration for Full-Text Search
+
+```python
+def upgrade():
+    op.execute("""
+        ALTER TABLE article ADD COLUMN search_vector tsvector
+        GENERATED ALWAYS AS (
+            setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+            setweight(to_tsvector('english', coalesce(body, '')), 'B')
+        ) STORED
+    """)
+
+    op.execute("""
+        CREATE INDEX ix_article_search ON article USING GIN (search_vector)
+    """)
+```
+
+### Search Query
+
+```python
+from sqlalchemy import func
+
+@classmethod
+def search(cls, query: str, limit: int = 20):
+    """Full-text search on articles."""
+    return cls.query.filter(
+        cls.search_vector.match(query, postgresql_regconfig='english')
+    ).order_by(
+        func.ts_rank(cls.search_vector, func.plainto_tsquery('english', query)).desc()
+    ).limit(limit).all()
+```
+
+---
+
+## Multi-Tenancy
+
+### Option 1: User-Owned Data (B2C)
+
+Simple foreign key approach:
+
+```python
+class Setting(BaseModel):
+    __tablename__ = 'setting'
+
+    user_id = db.Column(db.BigInteger, db.ForeignKey('user.id'), nullable=False, index=True)
+    key = db.Column(db.String(100), nullable=False)
+    value = db.Column(db.Text)
+
+    @classmethod
+    def for_user(cls, user_id: int):
+        """Get all settings for a user."""
+        return cls.query.filter_by(user_id=user_id).all()
+```
+
+### Option 2: Tenant-Based (B2B)
+
+Add tenant_id to all tables:
+
+```python
+class BaseModel(db.Model):
+    __abstract__ = True
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    tenant_id = db.Column(db.BigInteger, db.ForeignKey('tenant.id'), nullable=False, index=True)
+    # ... timestamps
+```
+
+### Row-Level Security (PostgreSQL)
+
+```sql
+-- Enable RLS
+ALTER TABLE setting ENABLE ROW LEVEL SECURITY;
+
+-- Policy: users can only see their own data
+CREATE POLICY user_isolation ON setting
+    USING (user_id = current_setting('app.user_id')::bigint);
+```
+
+```python
+# Set user context before queries
+@app.before_request
+def set_user_context():
+    if current_user.is_authenticated:
+        db.session.execute(f"SET LOCAL app.user_id = {current_user.id}")
 ```
 
 ---
@@ -507,65 +478,42 @@ class Setting(db.Model):
 # Single column index
 email = db.Column(db.String(255), index=True)
 
-# Unique index
-email = db.Column(db.String(255), unique=True)
-
 # Composite index
 __table_args__ = (
-    db.Index("ix_setting_user_key", "user_id", "key"),
+    db.Index('ix_setting_user_key', 'user_id', 'key'),
 )
 ```
 
 ### Query Optimization
 
 ```python
-# Limit columns fetched
+# Use only() to limit columns
 users = User.query.options(db.load_only(User.id, User.email)).all()
 
 # Batch inserts
 db.session.bulk_insert_mappings(User, [
-    {"email": "user1@example.com", "name": "User 1"},
-    {"email": "user2@example.com", "name": "User 2"},
+    {'email': 'user1@example.com', 'name': 'User 1'},
+    {'email': 'user2@example.com', 'name': 'User 2'},
 ])
 db.session.commit()
 
 # Batch updates
-User.query.filter(User.is_active == False).update({"is_active": True})
+User.query.filter(User.is_active == False).update({'is_active': True})
 db.session.commit()
 ```
 
-### Avoid N+1 Queries
+### Connection Pooling
 
 ```python
-# BAD - N+1 queries
-users = User.query.all()
-for user in users:
-    print(user.tasks)  # Separate query per user
-
-# GOOD - Single query with joinedload
-users = User.query.options(db.joinedload(User.tasks)).all()
-for user in users:
-    print(user.tasks)  # Already loaded
+SQLALCHEMY_ENGINE_OPTIONS = {
+    'pool_size': 5,          # Permanent connections
+    'max_overflow': 10,      # Extra connections when busy
+    'pool_timeout': 30,      # Wait time for connection
+    'pool_recycle': 300,     # Recycle connections after 5 min
+    'pool_pre_ping': True,   # Check connection health
+}
 ```
 
 ---
 
-## Cross-Module References
-
-When referencing models from other modules:
-
-```python
-# In modules/tasks/models/task.py
-from modules.core.models.user import User
-
-@ModelRegistry.register
-class Task(db.Model):
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
-    owner = db.relationship("User", backref="tasks")
-```
-
-**Note:** Direct imports create coupling. Only depend on core module unless necessary.
-
----
-
-**Next:** [Module System](module-system.md) | [MVC Pattern](mvc.md) | [Testing](testing.md)
+**Next:** [MVC Pattern](mvc.md) | [Testing](testing.md) | [Deployment](deployment.md)
