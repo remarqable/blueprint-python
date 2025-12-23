@@ -55,7 +55,7 @@ blueprint-python/
 
 ```bash
 # Add to your project
-git submodule add https://github.com/yourorg/blueprint-python.git blueprint
+git submodule add https://github.com/remarqable/blueprint-python.git blueprint
 
 # Point Claude to it
 # In your project's CLAUDE.md:
