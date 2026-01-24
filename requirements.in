@@ -1,0 +1,17 @@
+# Core
+Flask
+Flask-SQLAlchemy
+Flask-Login
+Flask-Migrate
+SQLAlchemy
+
+# Utilities
+structlog
+python-dotenv
+
+# Production server
+gunicorn
+
+# Testing
+pytest
+pytest-cov

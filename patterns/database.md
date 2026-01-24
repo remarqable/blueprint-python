@@ -1,186 +1,117 @@
 # Database Patterns
 
-> SQLAlchemy, Alembic migrations, PostgreSQL/SQLite patterns
+> SQLite by default (local and production), PostgreSQL-compatible conventions, auto-migrations at runtime
 
 ---
 
 ## Table of Contents
 
 - [Database Choice](#database-choice)
-- [SQLAlchemy Setup](#sqlalchemy-setup)
-- [Migrations with Alembic](#migrations-with-alembic)
+- [Auto-Migrations](#auto-migrations)
 - [Model Conventions](#model-conventions)
+- [Multi-Tenancy](#multi-tenancy)
 - [Query Patterns](#query-patterns)
 - [Transactions](#transactions)
-- [JSONB Columns](#jsonb-columns-postgresql)
-- [Full-Text Search](#full-text-search-postgresql)
-- [Multi-Tenancy](#multi-tenancy)
+- [PostgreSQL Features](#postgresql-features)
 - [Performance](#performance)
 
 ---
 
 ## Database Choice
 
-### SQLite (Default)
+### SQLite (Default - Local & Production)
 
-SQLite is the default - no setup required. The database file is created automatically.
+SQLite is the default for both development and production. No setup required.
 
 ```bash
 # DATABASE_URL format
-sqlite:///app.db
+DATABASE_URL=sqlite:///app.db
 
 # In-memory (for testing)
-sqlite:///:memory:
+DATABASE_URL=sqlite:///:memory:
 ```
 
 **SQLite works great for:**
 - Development and prototyping
-- Small to medium production apps
+- Small to medium production apps (most SaaS apps)
 - Single-server deployments
-- Apps with <100 concurrent users
+- Apps with <100 concurrent writers
 
-### PostgreSQL (Optional - When You Need It)
+**Why SQLite in production?**
+- Zero configuration, zero maintenance
+- No separate database server to manage
+- Backup is just copying a file
+- Fast for read-heavy workloads
+- Good enough for 99% of apps
 
-Add PostgreSQL when you need:
+### PostgreSQL (When You Need It)
+
+Switch to PostgreSQL when you need:
 - JSONB columns for flexible data
 - Full-text search
-- Row-level security (multi-tenancy)
-- High concurrency (100+ users)
-- Horizontal scaling
+- High write concurrency (100+ concurrent writers)
+- Horizontal scaling / read replicas
+
+**Migration path:** Just change `DATABASE_URL` in your .env file. The codebase uses PostgreSQL-compatible conventions (BigInteger IDs, proper column types) so migration is seamless.
 
 ```bash
+# Switch to PostgreSQL
+DATABASE_URL=postgresql://user:pass@localhost:5432/app
+
 # Install driver
 pip install psycopg2-binary
-
-# Start PostgreSQL
-docker run --name app-db \
-  -e POSTGRES_USER=app \
-  -e POSTGRES_PASSWORD=app \
-  -e POSTGRES_DB=app \
-  -p 5432:5432 -d postgres:15-alpine
-
-# Update DATABASE_URL
-export DATABASE_URL="postgresql://app:app@localhost:5432/app"
-```
-
-**Migration path:** Start with SQLite, switch to PostgreSQL when needed. SQLAlchemy makes this seamless - just change `DATABASE_URL`.
-
----
-
-## SQLAlchemy Setup
-
-### Extensions Configuration
-
-```python
-# app/extensions.py
-from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
-
-db = SQLAlchemy()
-migrate = Migrate()
-```
-
-### Config with Engine Options
-
-```python
-# app/config.py
-import os
-
-class Config:
-    DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
-    SQLALCHEMY_DATABASE_URI = DATABASE_URL
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
-
-    # PostgreSQL-specific options
-    if DATABASE_URL.startswith('postgresql'):
-        SQLALCHEMY_ENGINE_OPTIONS = {
-            'pool_size': 5,
-            'max_overflow': 10,
-            'pool_timeout': 30,
-            'pool_recycle': 300,
-            'pool_pre_ping': True,
-        }
 ```
 
 ---
 
-## Migrations with Alembic
+## Auto-Migrations
 
-### Initialize Migrations
+**Migrations run automatically at startup.** No manual `flask db upgrade` needed.
+
+### How It Works
+
+```python
+# app/__init__.py
+from flask import Flask
+from flask_migrate import upgrade
+from .extensions import db, migrate
+
+
+def create_app(config_class=Config):
+    app = Flask(__name__)
+    app.config.from_object(config_class)
+
+    db.init_app(app)
+    migrate.init_app(app, db)
+
+    # Auto-run migrations on startup
+    with app.app_context():
+        upgrade()
+
+    # ... rest of app setup
+    return app
+```
+
+### Creating New Migrations
+
+When you change models, create a migration:
 
 ```bash
-# First time setup
-flask db init
+# Generate migration from model changes
+flask db migrate -m "Add user preferences"
 
-# Create migration
-flask db migrate -m "Create user table"
-
-# Apply migration
-flask db upgrade
-
-# Rollback
-flask db downgrade
+# Review the generated migration in migrations/versions/
+# Commit to git
 ```
 
-### Migration Example
+The migration will auto-apply next time the app starts (locally or in production).
 
-```python
-# migrations/versions/001_create_user_table.py
-"""Create user table
+### Migration Best Practices
 
-Revision ID: 001
-"""
-from alembic import op
-import sqlalchemy as sa
-
-revision = '001'
-down_revision = None
-
-
-def upgrade():
-    op.create_table(
-        'user',
-        sa.Column('id', sa.BigInteger(), primary_key=True),
-        sa.Column('email', sa.String(255), unique=True, nullable=False),
-        sa.Column('name', sa.String(100), nullable=False),
-        sa.Column('avatar_url', sa.String(500), nullable=True),
-        sa.Column('is_active', sa.Boolean(), default=True),
-        sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.Column('updated_at', sa.DateTime(), nullable=False),
-    )
-    op.create_index('ix_user_email', 'user', ['email'])
-
-
-def downgrade():
-    op.drop_table('user')
-```
-
-### Demo Data
-
-```python
-# migrations/versions/999_demo_data.py
-"""Load demo data for development/testing"""
-
-from alembic import op
-from datetime import datetime
-
-revision = '999'
-down_revision = '001'
-
-
-def upgrade():
-    # Insert demo users
-    op.execute("""
-        INSERT INTO "user" (email, name, is_active, created_at, updated_at)
-        VALUES
-            ('alice@example.com', 'Alice', true, NOW(), NOW()),
-            ('bob@example.com', 'Bob', true, NOW(), NOW())
-    """)
-
-
-def downgrade():
-    op.execute("DELETE FROM \"user\" WHERE email IN ('alice@example.com', 'bob@example.com')")
-```
+1. **Always review generated migrations** before committing
+2. **Keep migrations small** - one logical change per migration
+3. **Test migrations locally** before deploying
+4. **Never edit applied migrations** - create new ones to fix issues
 
 ---
 
@@ -188,9 +119,9 @@ def downgrade():
 
 ### Naming
 
-- **Tables**: lowercase, singular (`user`, `setting`)
+- **Tables**: lowercase, singular (`user`, `setting`, `organization`)
 - **Columns**: snake_case (`created_at`, `user_id`)
-- **Foreign keys**: `<entity>_id` (`user_id`, `tenant_id`)
+- **Foreign keys**: `<entity>_id` (`user_id`, `org_id`)
 - **Indexes**: `ix_<table>_<column>` (`ix_user_email`)
 
 ### Base Model
@@ -202,6 +133,7 @@ from app.extensions import db
 
 
 class BaseModel(db.Model):
+    """Base model with common fields."""
     __abstract__ = True
 
     id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
@@ -210,15 +142,168 @@ class BaseModel(db.Model):
                            onupdate=datetime.utcnow)
 
     def save(self):
-        if hasattr(self, 'validate'):
-            self.validate()
+        """Save instance to database."""
         db.session.add(self)
         db.session.commit()
         return self
 
     def delete(self):
+        """Delete instance from database."""
         db.session.delete(self)
         db.session.commit()
+```
+
+### User Model
+
+```python
+# app/models/user.py
+from app.extensions import db
+from app.models.base import BaseModel
+
+
+class User(BaseModel):
+    """User model."""
+    __tablename__ = 'user'
+
+    email = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=False)
+    avatar_url = db.Column(db.String(500), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+
+    @classmethod
+    def get_by_email(cls, email: str):
+        """Find user by email."""
+        return cls.query.filter_by(email=email.lower()).first()
+
+    @classmethod
+    def create(cls, email: str, name: str) -> 'User':
+        """Create a new user."""
+        user = cls(email=email.lower(), name=name)
+        return user.save()
+```
+
+---
+
+## Multi-Tenancy
+
+> **Blueprint Configuration:** This section depends on your app type (B2C or B2B).
+> See [Project Configuration](#project-configuration) in CLAUDE.md for your app's settings.
+
+### B2C: User-Owned Data
+
+Each user owns their own data. Simple foreign key approach.
+
+```python
+# app/models/setting.py
+class Setting(BaseModel):
+    """User setting (key-value)."""
+    __tablename__ = 'setting'
+
+    user_id = db.Column(db.BigInteger, db.ForeignKey('user.id'), nullable=False, index=True)
+    key = db.Column(db.String(100), nullable=False)
+    value = db.Column(db.Text)
+
+    # Ensure unique key per user
+    __table_args__ = (db.UniqueConstraint('user_id', 'key'),)
+
+    # Relationship
+    user = db.relationship('User', backref='settings')
+
+    @classmethod
+    def for_user(cls, user_id: int):
+        """Get all settings for a user."""
+        return cls.query.filter_by(user_id=user_id).all()
+
+    @classmethod
+    def get(cls, user_id: int, key: str, default=None):
+        """Get a setting value."""
+        setting = cls.query.filter_by(user_id=user_id, key=key).first()
+        return setting.value if setting else default
+
+    @classmethod
+    def set(cls, user_id: int, key: str, value: str):
+        """Set a setting value."""
+        setting = cls.query.filter_by(user_id=user_id, key=key).first()
+        if setting:
+            setting.value = value
+        else:
+            setting = cls(user_id=user_id, key=key, value=value)
+        return setting.save()
+```
+
+### B2B: Organization-Based
+
+Users belong to organizations. All data is scoped to an organization.
+
+```python
+# app/models/organization.py
+class Organization(BaseModel):
+    """Organization (tenant)."""
+    __tablename__ = 'organization'
+
+    name = db.Column(db.String(100), nullable=False)
+    slug = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+
+
+# app/models/user.py
+class User(BaseModel):
+    """User belonging to an organization."""
+    __tablename__ = 'user'
+
+    org_id = db.Column(db.BigInteger, db.ForeignKey('organization.id'), nullable=False, index=True)
+    email = db.Column(db.String(255), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=False)
+    role = db.Column(db.String(20), default='member', nullable=False)  # owner, admin, member
+
+    # Unique email per organization
+    __table_args__ = (db.UniqueConstraint('org_id', 'email'),)
+
+    # Relationship
+    organization = db.relationship('Organization', backref='users')
+
+
+# app/models/base.py - for org-scoped models
+class OrgScopedModel(BaseModel):
+    """Base for organization-scoped models."""
+    __abstract__ = True
+
+    org_id = db.Column(db.BigInteger, db.ForeignKey('organization.id'), nullable=False, index=True)
+```
+
+### Query Helper (B2B)
+
+```python
+# app/platform/tenant.py
+from flask import g
+from functools import wraps
+
+
+def get_current_org_id() -> int:
+    """Get current organization ID from request context."""
+    return g.get('org_id')
+
+
+def org_scope(f):
+    """Decorator to ensure org_id is set in queries."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not get_current_org_id():
+            raise ValueError("No organization context set")
+        return f(*args, **kwargs)
+    return decorated
+
+
+# Usage in model
+class Project(OrgScopedModel):
+    __tablename__ = 'project'
+
+    name = db.Column(db.String(200), nullable=False)
+
+    @classmethod
+    def for_org(cls):
+        """Get all projects for current org."""
+        return cls.query.filter_by(org_id=get_current_org_id()).all()
 ```
 
 ---
@@ -240,7 +325,7 @@ users = User.query.filter(User.is_active == True).all()
 users = User.query.order_by(User.created_at.desc()).limit(10).all()
 
 # Count
-count = User.query.count()
+count = User.query.filter_by(is_active=True).count()
 ```
 
 ### Pagination
@@ -258,7 +343,7 @@ users = pagination.items
 total_pages = pagination.pages
 ```
 
-### Joins and Relationships
+### Joins and Eager Loading
 
 ```python
 # Eager loading (avoid N+1)
@@ -300,7 +385,7 @@ def transfer_credits(from_user_id: int, to_user_id: int, amount: int):
         raise
 ```
 
-### Context Manager Pattern
+### Context Manager
 
 ```python
 from contextlib import contextmanager
@@ -326,9 +411,11 @@ with transaction():
 
 ---
 
-## JSONB Columns (PostgreSQL)
+## PostgreSQL Features
 
-### Model Definition
+> These features only work with PostgreSQL. SQLite will ignore them.
+
+### JSONB Columns
 
 ```python
 from sqlalchemy.dialects.postgresql import JSONB
@@ -337,39 +424,17 @@ class User(BaseModel):
     __tablename__ = 'user'
 
     email = db.Column(db.String(255), unique=True, nullable=False)
-    name = db.Column(db.String(100), nullable=False)
     metadata = db.Column(JSONB, default=dict)  # Flexible JSON storage
 ```
 
-### Querying JSONB
-
 ```python
-# Filter by JSON key
+# Querying JSONB
 users = User.query.filter(User.metadata['role'].astext == 'admin').all()
-
-# Check if key exists
 users = User.query.filter(User.metadata.has_key('verified')).all()
-
-# Contains
 users = User.query.filter(User.metadata.contains({'active': True})).all()
 ```
 
-### JSONB Index (Migration)
-
-```python
-def upgrade():
-    # GIN index for JSONB queries
-    op.execute("""
-        CREATE INDEX ix_user_metadata ON "user"
-        USING GIN (metadata)
-    """)
-```
-
----
-
-## Full-Text Search (PostgreSQL)
-
-### Model with Search Vector
+### Full-Text Search
 
 ```python
 from sqlalchemy.dialects.postgresql import TSVECTOR
@@ -382,7 +447,7 @@ class Article(BaseModel):
     search_vector = db.Column(TSVECTOR)  # Generated column
 ```
 
-### Migration for Full-Text Search
+Migration for FTS:
 
 ```python
 def upgrade():
@@ -393,79 +458,7 @@ def upgrade():
             setweight(to_tsvector('english', coalesce(body, '')), 'B')
         ) STORED
     """)
-
-    op.execute("""
-        CREATE INDEX ix_article_search ON article USING GIN (search_vector)
-    """)
-```
-
-### Search Query
-
-```python
-from sqlalchemy import func
-
-@classmethod
-def search(cls, query: str, limit: int = 20):
-    """Full-text search on articles."""
-    return cls.query.filter(
-        cls.search_vector.match(query, postgresql_regconfig='english')
-    ).order_by(
-        func.ts_rank(cls.search_vector, func.plainto_tsquery('english', query)).desc()
-    ).limit(limit).all()
-```
-
----
-
-## Multi-Tenancy
-
-### Option 1: User-Owned Data (B2C)
-
-Simple foreign key approach:
-
-```python
-class Setting(BaseModel):
-    __tablename__ = 'setting'
-
-    user_id = db.Column(db.BigInteger, db.ForeignKey('user.id'), nullable=False, index=True)
-    key = db.Column(db.String(100), nullable=False)
-    value = db.Column(db.Text)
-
-    @classmethod
-    def for_user(cls, user_id: int):
-        """Get all settings for a user."""
-        return cls.query.filter_by(user_id=user_id).all()
-```
-
-### Option 2: Tenant-Based (B2B)
-
-Add tenant_id to all tables:
-
-```python
-class BaseModel(db.Model):
-    __abstract__ = True
-
-    id = db.Column(db.BigInteger, primary_key=True)
-    tenant_id = db.Column(db.BigInteger, db.ForeignKey('tenant.id'), nullable=False, index=True)
-    # ... timestamps
-```
-
-### Row-Level Security (PostgreSQL)
-
-```sql
--- Enable RLS
-ALTER TABLE setting ENABLE ROW LEVEL SECURITY;
-
--- Policy: users can only see their own data
-CREATE POLICY user_isolation ON setting
-    USING (user_id = current_setting('app.user_id')::bigint);
-```
-
-```python
-# Set user context before queries
-@app.before_request
-def set_user_context():
-    if current_user.is_authenticated:
-        db.session.execute(f"SET LOCAL app.user_id = {current_user.id}")
+    op.execute("CREATE INDEX ix_article_search ON article USING GIN (search_vector)")
 ```
 
 ---
@@ -487,7 +480,7 @@ __table_args__ = (
 ### Query Optimization
 
 ```python
-# Use only() to limit columns
+# Select specific columns only
 users = User.query.options(db.load_only(User.id, User.email)).all()
 
 # Batch inserts
@@ -502,16 +495,18 @@ User.query.filter(User.is_active == False).update({'is_active': True})
 db.session.commit()
 ```
 
-### Connection Pooling
+### Connection Pooling (PostgreSQL)
 
 ```python
-SQLALCHEMY_ENGINE_OPTIONS = {
-    'pool_size': 5,          # Permanent connections
-    'max_overflow': 10,      # Extra connections when busy
-    'pool_timeout': 30,      # Wait time for connection
-    'pool_recycle': 300,     # Recycle connections after 5 min
-    'pool_pre_ping': True,   # Check connection health
-}
+# app/config.py
+if DATABASE_URL.startswith('postgresql'):
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_size': 5,
+        'max_overflow': 10,
+        'pool_timeout': 30,
+        'pool_recycle': 300,
+        'pool_pre_ping': True,
+    }
 ```
 
 ---

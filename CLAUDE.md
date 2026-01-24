@@ -8,64 +8,112 @@
 
 ## 🚀 QUICK START (New Project Bootstrap)
 
-**👉 AI Agents: Execute this section first (20 minutes to running app)**
+**👉 AI Agents: Execute this section first**
+
+### Step 0: Ask Configuration Questions
+
+Before creating any files, ask the user these questions:
+
+**1. App Type** (determines multi-tenancy model)
+- **B2C (User-based)**: Each user owns their own data. Use `user_id` foreign keys.
+- **B2B (Organization-based)**: Users belong to organizations. Use `org_id` foreign keys.
+
+**2. Audit Logging**
+- **No audit**: Simple apps. Just `created_at`/`updated_at` timestamps.
+- **Yes, add audit**: Track `created_by`, `updated_by` on models.
+
+Record the answers in the Project Configuration section below.
 
 ### Prerequisites Checklist
 - [ ] Python 3.11+
 - [ ] Make
-- [ ] PostgreSQL 15+ (optional - SQLite works out of the box)
 
 ### Bootstrap Sequence (Follow in Order)
 
-**Step 1: Initialize Project** (2 min)
+**Step 1: Initialize Project**
 ```bash
 mkdir yourapp && cd yourapp
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
 
+# Create folder structure
 mkdir -p app/{models,controllers,views/{layouts,partials,users,settings,errors},static/{css,js,img},lang,middleware,platform}
-mkdir -p migrations/versions tests/{test_models,test_controllers} config patterns
+mkdir -p migrations/versions tests/{test_models,test_controllers} config patterns scripts
 touch app/__init__.py app/models/__init__.py app/controllers/__init__.py
 touch app/middleware/__init__.py app/platform/__init__.py
 ```
 ✅ **Verify:** `ls app` shows folder structure
 
-**Step 2: Install Dependencies** (1 min)
+**Step 2: Create requirements.in**
 ```bash
-# Create requirements.txt
-cat > requirements.txt <<EOF
-Flask>=3.0.0
-Flask-SQLAlchemy>=3.1.0
-Flask-Login>=0.6.3
-Flask-Migrate>=4.0.5
-SQLAlchemy>=2.0.0
-structlog>=24.1.0
-python-dotenv>=1.0.0
-gunicorn>=21.0.0
-pytest>=8.0.0
+cat > requirements.in <<EOF
+# Core
+Flask
+Flask-SQLAlchemy
+Flask-Login
+Flask-Migrate
+SQLAlchemy
+
+# Utilities
+structlog
+python-dotenv
+
+# Production server
+gunicorn
+
+# Testing
+pytest
+pytest-cov
 EOF
+```
 
-pip install -r requirements.txt
+**Step 3: Create Makefile**
+```makefile
+.PHONY: venv install compile run test clean deploy
 
-# Optional: Add PostgreSQL support when needed
-# pip install psycopg2-binary
+venv:
+	python3 -m venv venv
+	@echo "Run 'source venv/bin/activate' to activate."
+
+install: venv
+	./venv/bin/pip install -r requirements.txt
+
+compile:
+	./venv/bin/pip install pip-tools
+	./venv/bin/pip-compile requirements.in -o requirements.txt
+
+run:
+	./venv/bin/python run.py
+
+test:
+	./venv/bin/pytest tests/ -v
+
+clean:
+	rm -rf venv
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+deploy:
+	./scripts/deploy.sh
+```
+
+**Step 4: Setup Environment**
+```bash
+# Create virtual environment and install
+make venv
+source venv/bin/activate
+make compile
+make install
+
+# Create config/local.env
+cat > config/local.env <<EOF
+APP_ENV=dev
+PORT=8000
+DATABASE_URL=sqlite:///app.db
+SECRET_KEY=dev-secret-change-in-production
+DEV_MAGIC=true
+EOF
 ```
 ✅ **Verify:** `pip list` shows Flask installed
 
-**Step 3: Database Setup** (1 min)
-```bash
-# SQLite (default - no setup required)
-# Database file created automatically at app.db
-
-# Optional: PostgreSQL (for production or advanced features)
-# docker run --name app-db \
-#   -e POSTGRES_USER=app -e POSTGRES_PASSWORD=app -e POSTGRES_DB=app \
-#   -p 5432:5432 -d postgres:15-alpine
-# Then set: DATABASE_URL="postgresql://app:app@localhost:5432/app"
-```
-✅ **Verify:** Continue to next step (SQLite needs no verification)
-
-**Step 4: Platform Layer** (10 min)
+**Step 5: Platform Layer**
 
 Create these files (see detailed sections below):
 - `app/extensions.py` → § Extensions Setup
@@ -76,26 +124,17 @@ Create these files (see detailed sections below):
 
 ✅ **Verify:** Files exist, no import errors
 
-**Step 5: First Model + Controller** (10 min)
-- Create `app/models/base.py` → § Models Pattern
+**Step 6: First Model + Controller**
+- Create `app/models/base.py` → § Models Pattern (use B2C or B2B based on config)
 - Create `app/models/user.py` → § Models Pattern
 - Create `app/controllers/main.py` → § Controllers Pattern
-- Create `app/__init__.py` → § Application Factory
+- Create `app/__init__.py` → § Application Factory (includes auto-migrations)
 - Create `app/views/layouts/base.html` → § Views Pattern
 
 ✅ **Verify:** `python -c "from app import create_app; create_app()"` succeeds
 
-**Step 6: Environment & Run** (2 min)
+**Step 7: Run**
 ```bash
-# Create config/local.env
-cat > config/local.env <<EOF
-APP_ENV=dev
-PORT=8000
-DATABASE_URL=sqlite:///app.db
-SECRET_KEY=dev-secret-change-in-production
-DEV_MAGIC=true
-EOF
-
 # Create run.py
 cat > run.py <<EOF
 from dotenv import load_dotenv
@@ -106,11 +145,38 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000, debug=True)
 EOF
 
-python run.py
+make run
 ```
 ✅ **Verify:** Server runs at http://localhost:8000
 
-**Expected Time: 20 minutes to running app**
+---
+
+## 📋 PROJECT CONFIGURATION
+
+> **AI Agents:** Update this section after asking the user configuration questions.
+
+```yaml
+# Project Configuration (fill in after asking user)
+app_type: B2C  # or B2B
+audit_logging: false  # or true
+```
+
+### What This Means
+
+**If B2C:**
+- Use `user_id` foreign keys on data models
+- No Organization model needed
+- See [patterns/database.md#b2c-user-owned-data](patterns/database.md#b2c-user-owned-data)
+
+**If B2B:**
+- Create Organization model
+- Use `org_id` foreign keys on data models
+- Users have `org_id` and `role` fields
+- See [patterns/database.md#b2b-organization-based](patterns/database.md#b2b-organization-based)
+
+**If audit_logging: true:**
+- Add `created_by` and `updated_by` to BaseModel
+- Track user who made changes
 
 ---
 
@@ -126,7 +192,7 @@ python run.py
 1. [Extensions Setup](#extensions-setup) - SQLAlchemy, Login Manager
 2. [Configuration](#configuration) - Environment variables
 3. [Logging](#logging) - Structured logging
-4. [Application Factory](#application-factory) - Flask app setup
+4. [Application Factory](#application-factory) - Flask app setup with auto-migrations
 5. [Internationalization](#internationalization) → [patterns/i18n.md](patterns/i18n.md)
 6. [Sessions & Auth](#sessions--auth) → [patterns/auth.md](patterns/auth.md)
 7. [Error Handling](#error-handling) - Custom exceptions
@@ -139,7 +205,7 @@ python run.py
 ### Features (Cross-referenced)
 - [HTMX Patterns](#htmx-patterns) → [patterns/htmx.md](patterns/htmx.md)
 - [Frontend Architecture](#frontend-architecture) → [patterns/frontend.md](patterns/frontend.md)
-- [Multi-Tenancy](#multi-tenancy) → [patterns/database.md](patterns/database.md#multi-tenancy-with-row-level-security)
+- [Multi-Tenancy](#multi-tenancy) → [patterns/database.md](patterns/database.md#multi-tenancy)
 - [Security](#security) → [patterns/security.md](patterns/security.md)
 
 ### Operations
@@ -148,14 +214,14 @@ python run.py
 
 ### Pattern Guides
 - [MVC Pattern Guide](patterns/mvc.md) - Models, Views, Controllers in detail
-- [Database Patterns](patterns/database.md) - SQLAlchemy, Alembic, JSONB, FTS
+- [Database Patterns](patterns/database.md) - SQLAlchemy, auto-migrations, multi-tenancy
 - [i18n Guide](patterns/i18n.md) - Complete internationalization
 - [Auth & Sessions](patterns/auth.md) - Magic links, OAuth, sessions
 - [HTMX Cookbook](patterns/htmx.md) - Interactive patterns
 - [Frontend Guide](patterns/frontend.md) - Bootstrap + HTMX
 - [Testing Guide](patterns/testing.md) - pytest patterns
 - [Security Guide](patterns/security.md) - CSRF, rate limiting, security checklist
-- [Deployment Guide](patterns/deployment.md) - Production deployment
+- [Deployment Guide](patterns/deployment.md) - systemd + Caddy on Digital Ocean
 
 ---
 
@@ -168,7 +234,9 @@ python run.py
 - **Server-rendered HTML + HTMX**: No SPA complexity, progressive enhancement.
 - **i18n from day 1**: Global-ready from the start.
 - **Security and observability by default**: CSRF, rate limiting, logging.
-- **Zero yak-shaving dev loop**: `python run.py` boots a working app.
+- **Zero yak-shaving dev loop**: `make run` boots a working app.
+- **SQLite by default**: No database server needed. Switch to PostgreSQL when you need it.
+- **Auto-migrations**: Migrations run automatically at startup.
 
 ### Fat Models, Thin Controllers
 
@@ -194,7 +262,7 @@ python run.py
 ```
 yourapp/
 ├── app/
-│   ├── __init__.py              # Application factory
+│   ├── __init__.py              # Application factory (with auto-migrations)
 │   ├── config.py                # Configuration management
 │   ├── extensions.py            # SQLAlchemy, LoginManager init
 │   ├── models/                  # Domain models (fat models)
@@ -204,7 +272,7 @@ yourapp/
 │   │   └── setting.py           # Setting model (key-value config)
 │   ├── controllers/             # Flask blueprints (thin)
 │   │   ├── __init__.py
-│   │   ├── main.py              # Home, about pages
+│   │   ├── main.py              # Home, about pages, health check
 │   │   ├── auth.py              # Login, logout, magic links
 │   │   ├── users.py             # Profile management
 │   │   └── settings.py          # User settings
@@ -247,14 +315,16 @@ yourapp/
 │   ├── conftest.py              # Fixtures
 │   ├── test_models/
 │   └── test_controllers/
+├── scripts/
+│   └── deploy.sh                # Production deployment script
 ├── config/
 │   └── local.env.example
 ├── patterns/                    # Documentation
 ├── run.py                       # Development entry point
 ├── wsgi.py                      # Production entry point (Gunicorn)
-├── requirements.txt
+├── requirements.in              # Package names (no versions)
+├── requirements.txt             # Compiled with pinned versions
 ├── Makefile
-├── Dockerfile
 ├── README.md
 └── CLAUDE.md                    # This file
 ```
@@ -267,16 +337,17 @@ yourapp/
 |-------|-----------|-----------|
 | **Backend** | Python 3.11+ | Type hints, performance, ecosystem |
 | **Web Framework** | Flask 3.x | Simple, mature, Jinja2 built-in |
-| **Database** | SQLite (default) / PostgreSQL | No setup needed; Postgres for advanced features |
-| **ORM** | SQLAlchemy 2.0 | Declarative models, excellent Postgres support |
-| **Migrations** | Alembic (Flask-Migrate) | SQLAlchemy's official migration tool |
+| **Database** | SQLite (default) | No setup; PostgreSQL when needed |
+| **ORM** | SQLAlchemy 2.0 | Declarative models, Postgres-compatible |
+| **Migrations** | Alembic (Flask-Migrate) | Auto-run at startup |
 | **Templates** | Jinja2 | Auto-escaping, fast, Flask-native |
 | **Frontend** | Bootstrap 5 + HTMX | No build step, progressive enhancement |
 | **i18n** | JSON catalogs | Simple, runtime-loaded |
 | **Logging** | structlog | Structured JSON logging |
 | **Auth** | Flask-Login + Magic links | Easy to start, extensible |
 | **Testing** | pytest | Transaction rollback pattern |
-| **Server** | Gunicorn | Production WSGI server |
+| **Server** | Gunicorn + systemd | Production WSGI server |
+| **Reverse Proxy** | Caddy | Automatic HTTPS |
 
 ---
 
@@ -348,10 +419,20 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-change-in-production')
     DEBUG = APP_ENV == 'dev'
 
-    # Database (PostgreSQL or SQLite)
+    # Database (SQLite default, PostgreSQL optional)
     DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # PostgreSQL connection pooling (only if using Postgres)
+    if DATABASE_URL.startswith('postgresql'):
+        SQLALCHEMY_ENGINE_OPTIONS = {
+            'pool_size': 5,
+            'max_overflow': 10,
+            'pool_timeout': 30,
+            'pool_recycle': 300,
+            'pool_pre_ping': True,
+        }
 
     # Session
     SESSION_COOKIE_SECURE = APP_ENV != 'dev'
@@ -410,14 +491,17 @@ def get_logger():
 
 ## Application Factory
 
+**Note:** Migrations run automatically at startup.
+
 ```python
 # app/__init__.py
-"""Flask application factory."""
+"""Flask application factory with auto-migrations."""
 
 from flask import Flask
+from flask_migrate import upgrade
 from .config import Config
 from .extensions import db, migrate, login_manager
-from .platform.logger import init_logger
+from .platform.logger import init_logger, get_logger
 
 
 def create_app(config_class=Config):
@@ -427,11 +511,17 @@ def create_app(config_class=Config):
 
     # Initialize logging
     init_logger(app.config['APP_ENV'])
+    log = get_logger()
 
     # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
     login_manager.init_app(app)
+
+    # Auto-run migrations on startup
+    with app.app_context():
+        upgrade()
+        log.info('migrations_applied')
 
     # Register blueprints
     from .controllers import main, auth, users, settings
@@ -503,6 +593,8 @@ class UnauthorizedError(AppError):
 
 → **See complete guide:** [patterns/mvc.md](patterns/mvc.md#models-fat-models)
 
+→ **For multi-tenancy (B2C vs B2B):** [patterns/database.md](patterns/database.md#multi-tenancy)
+
 ---
 
 ## Controllers
@@ -541,12 +633,9 @@ class UnauthorizedError(AppError):
 
 ## Multi-Tenancy
 
-### Default: User-Owned Data (B2C)
+Based on your Project Configuration:
 
-**Most SaaS apps** start here:
-- Use `user_id` foreign keys
-- Application-layer filtering in queries
-- Simpler, faster to build
+### B2C: User-Owned Data
 
 ```python
 class Setting(BaseModel):
@@ -559,7 +648,17 @@ class Setting(BaseModel):
     __table_args__ = (db.UniqueConstraint('user_id', 'key'),)
 ```
 
-→ **For multi-tenant (B2B) patterns:** See [patterns/database.md](patterns/database.md#multi-tenancy)
+### B2B: Organization-Based
+
+```python
+class OrgScopedModel(BaseModel):
+    """Base for organization-scoped models."""
+    __abstract__ = True
+
+    org_id = db.Column(db.BigInteger, db.ForeignKey('organization.id'), nullable=False, index=True)
+```
+
+→ **For complete patterns:** See [patterns/database.md](patterns/database.md#multi-tenancy)
 
 ---
 
@@ -603,31 +702,21 @@ def client(app):
 
 ## Deployment
 
-### Entry Points
+**Stack:** Digital Ocean Droplet + systemd + Gunicorn + Caddy
 
-```python
-# run.py (Development)
-from dotenv import load_dotenv
-load_dotenv('config/local.env')
-from app import create_app
-
-app = create_app()
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8000, debug=True)
-```
-
-```python
-# wsgi.py (Production)
-from app import create_app
-app = create_app()
-```
-
-### Production Command
+### Quick Deploy
 
 ```bash
-gunicorn wsgi:app -w 4 -b 0.0.0.0:8000
+make deploy
 ```
+
+This runs `scripts/deploy.sh` which:
+1. Checks for uncommitted changes
+2. Pushes to origin
+3. Pulls on server
+4. Installs dependencies
+5. Restarts systemd service
+6. Verifies health check
 
 → **For complete deployment guide:** See [patterns/deployment.md](patterns/deployment.md)
 
@@ -636,22 +725,15 @@ gunicorn wsgi:app -w 4 -b 0.0.0.0:8000
 ## Makefile
 
 ```makefile
-.PHONY: run install test migrate
+.PHONY: venv install compile run test clean deploy
 
-run:
-	python run.py
-
-install:
-	pip install -r requirements.txt
-
-test:
-	pytest tests/ -v --cov=app
-
-migrate:
-	flask db upgrade
-
-migrate-new:
-	flask db migrate -m "$(msg)"
+venv:        # Create virtual environment
+install:     # Install dependencies
+compile:     # Compile requirements.in -> requirements.txt
+run:         # Run development server
+test:        # Run tests
+clean:       # Remove venv and cached files
+deploy:      # Deploy to production
 ```
 
 ---
@@ -661,10 +743,11 @@ migrate-new:
 ### For Claude/AI Assistants
 
 **When bootstrapping new project:**
-1. Read § Quick Start (top of file)
-2. Execute steps 1-6 in order
-3. Reference detailed sections as needed
-4. Verify: `python run.py` succeeds
+1. **Ask configuration questions first** (B2C/B2B, audit logging)
+2. Record answers in Project Configuration section
+3. Execute Quick Start steps 1-7 in order
+4. Use appropriate model patterns based on configuration
+5. Verify: `make run` succeeds
 
 **When adding features:**
 1. Scan Table of Contents for relevant section
@@ -681,6 +764,7 @@ migrate-new:
 
 **Never skip:**
 - Philosophy (defines patterns)
+- Project Configuration (determines model patterns)
 - Quick Start (ensures nothing missed)
 - MVC Pattern sections (core architecture)
 

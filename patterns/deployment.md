@@ -1,30 +1,47 @@
 # Deployment Guide
 
-> Production deployment with Gunicorn, Docker, and cloud platforms
+> Production deployment with Gunicorn, systemd, and Caddy on Digital Ocean
 
 ---
 
 ## Table of Contents
 
-- [Application Startup](#application-startup)
+- [Overview](#overview)
+- [Application Entry Points](#application-entry-points)
 - [Environment Variables](#environment-variables)
-- [WSGI Server (Gunicorn)](#wsgi-server-gunicorn)
-- [Docker Deployment](#docker-deployment)
-- [Reverse Proxy](#reverse-proxy)
-- [Cloud Platforms](#cloud-platforms)
+- [Local Development](#local-development)
+- [Production Setup](#production-setup)
+- [Deploy Script](#deploy-script)
+- [Health Check](#health-check)
 - [Production Checklist](#production-checklist)
-- [Graceful Shutdown](#graceful-shutdown)
 
 ---
 
-## Application Startup
+## Overview
 
-### Development Entry Point
+**Stack:**
+- **Server**: Digital Ocean Droplet (or any VPS)
+- **Process Manager**: systemd
+- **WSGI Server**: Gunicorn
+- **Reverse Proxy**: Caddy (automatic HTTPS)
+- **Database**: SQLite (file-based, no separate service)
+
+**Why this stack?**
+- Simple, reliable, low maintenance
+- Automatic HTTPS with Caddy
+- systemd handles restarts, logging, boot
+- No containers, no orchestration complexity
+- Scales to thousands of users on a $12/month droplet
+
+---
+
+## Application Entry Points
+
+### Development
 
 ```python
 # run.py
 """Development server entry point."""
-
 from dotenv import load_dotenv
 load_dotenv('config/local.env')
 
@@ -35,22 +52,16 @@ app = create_app()
 if __name__ == '__main__':
     import os
     port = int(os.environ.get('PORT', 8000))
-
-    print(f'\n  App running at:')
-    print(f'  - Local:   http://localhost:{port}')
-    print(f'  - Network: http://0.0.0.0:{port}\n')
-
+    print(f'\n  App running at http://localhost:{port}\n')
     app.run(host='0.0.0.0', port=port, debug=True)
 ```
 
-### Production Entry Point
+### Production
 
 ```python
 # wsgi.py
 """Production WSGI entry point."""
-
 from app import create_app
-
 app = create_app()
 ```
 
@@ -62,8 +73,8 @@ app = create_app()
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `SECRET_KEY` | Session encryption key | `secrets.token_hex(32)` |
-| `DATABASE_URL` | Database connection string | `postgresql://user:pass@host/db` |
+| `SECRET_KEY` | Session encryption key | `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `DATABASE_URL` | Database connection | `sqlite:///app.db` |
 
 ### Optional
 
@@ -71,12 +82,10 @@ app = create_app()
 |----------|-------------|---------|
 | `APP_ENV` | Environment name | `dev` |
 | `PORT` | Server port | `8000` |
-| `DEBUG` | Debug mode | `false` |
 
-### Example .env File
+### Example config/local.env
 
 ```bash
-# config/local.env.example
 APP_ENV=dev
 PORT=8000
 SECRET_KEY=dev-secret-key-change-in-production
@@ -84,267 +93,294 @@ DATABASE_URL=sqlite:///app.db
 DEV_MAGIC=true
 ```
 
-### Generating Secret Key
+### Production .env
 
-```python
-python -c "import secrets; print(secrets.token_hex(32))"
+```bash
+APP_ENV=production
+PORT=8000
+SECRET_KEY=<generate-with-secrets.token_hex(32)>
+DATABASE_URL=sqlite:///data/app.db
 ```
 
 ---
 
-## WSGI Server (Gunicorn)
-
-### Basic Usage
+## Local Development
 
 ```bash
-# Install
-pip install gunicorn
+# Setup
+make venv
+make install
 
 # Run
-gunicorn wsgi:app -w 4 -b 0.0.0.0:8000
-```
-
-### Production Configuration
-
-```bash
-# gunicorn.conf.py
-import multiprocessing
-
-# Binding
-bind = "0.0.0.0:8000"
-
-# Workers
-workers = multiprocessing.cpu_count() * 2 + 1
-worker_class = "sync"
-timeout = 30
-
-# Logging
-accesslog = "-"
-errorlog = "-"
-loglevel = "info"
-
-# Security
-limit_request_line = 4094
-limit_request_fields = 100
-```
-
-```bash
-# Run with config
-gunicorn wsgi:app -c gunicorn.conf.py
-```
-
-### Makefile Target
-
-```makefile
-prod:
-	gunicorn wsgi:app -w 4 -b 0.0.0.0:8000 --access-logfile - --error-logfile -
+make run
 ```
 
 ---
 
-## Docker Deployment
+## Production Setup
 
-### Dockerfile
-
-```dockerfile
-# Dockerfile
-FROM python:3.11-slim
-
-# Set working directory
-WORKDIR /app
-
-# Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt gunicorn
-
-# Copy application
-COPY . .
-
-# Create non-root user
-RUN adduser --disabled-password --gecos '' appuser
-USER appuser
-
-# Expose port
-EXPOSE 8000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Run
-CMD ["gunicorn", "wsgi:app", "-w", "4", "-b", "0.0.0.0:8000"]
-```
-
-### .dockerignore
-
-```
-# .dockerignore
-.git
-.gitignore
-__pycache__
-*.pyc
-*.pyo
-.pytest_cache
-.coverage
-htmlcov/
-venv/
-.env
-config/local.env
-*.db
-```
-
-### Docker Compose
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-
-services:
-  web:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - APP_ENV=production
-      - DATABASE_URL=postgresql://app:app@db:5432/app
-      - SECRET_KEY=${SECRET_KEY}
-    depends_on:
-      - db
-
-  db:
-    image: postgres:15-alpine
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    environment:
-      - POSTGRES_USER=app
-      - POSTGRES_PASSWORD=app
-      - POSTGRES_DB=app
-
-volumes:
-  postgres_data:
-```
-
-### Build and Run
+### 1. Server Preparation (Digital Ocean Droplet)
 
 ```bash
-# Build
-docker build -t yourapp .
+# SSH into server
+ssh root@your-server.com
 
-# Run
-docker run -p 8000:8000 --env-file .env yourapp
+# Create app directory
+mkdir -p /opt/yourapp
+cd /opt/yourapp
 
-# Docker Compose
-docker-compose up -d
+# Clone repository
+git clone https://github.com/yourorg/yourapp.git .
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Create data directory for SQLite
+mkdir -p data
+
+# Create production .env
+cat > .env <<EOF
+APP_ENV=production
+PORT=8000
+SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
+DATABASE_URL=sqlite:///data/app.db
+EOF
 ```
 
----
+### 2. Systemd Service
 
-## Reverse Proxy
+```ini
+# /etc/systemd/system/yourapp.service
+[Unit]
+Description=YourApp Flask Application
+After=network.target
 
-### Caddy (Recommended)
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/yourapp
+Environment="PATH=/opt/yourapp/venv/bin"
+EnvironmentFile=/opt/yourapp/.env
+ExecStart=/opt/yourapp/venv/bin/gunicorn wsgi:app -w 4 -b 127.0.0.1:8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# Enable and start service
+sudo systemctl daemon-reload
+sudo systemctl enable yourapp
+sudo systemctl start yourapp
+
+# Check status
+sudo systemctl status yourapp
+
+# View logs
+sudo journalctl -u yourapp -f
+```
+
+### 3. Caddy Reverse Proxy
+
+```bash
+# Install Caddy
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install caddy
+```
 
 ```
-# Caddyfile
+# /etc/caddy/Caddyfile
 yourapp.com {
     reverse_proxy localhost:8000
 }
 ```
 
-Caddy provides:
-- Automatic HTTPS (Let's Encrypt)
-- HTTP/2
-- Auto compression
+```bash
+# Reload Caddy
+sudo systemctl reload caddy
+```
 
-### Nginx
+Caddy automatically:
+- Obtains and renews SSL certificates
+- Redirects HTTP to HTTPS
+- Enables HTTP/2
 
-```nginx
-# /etc/nginx/sites-available/yourapp
-server {
-    listen 80;
-    server_name yourapp.com;
-    return 301 https://$server_name$request_uri;
-}
+### 4. File Permissions
 
-server {
-    listen 443 ssl http2;
-    server_name yourapp.com;
+```bash
+# Set ownership
+sudo chown -R www-data:www-data /opt/yourapp
 
-    ssl_certificate /etc/letsencrypt/live/yourapp.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/yourapp.com/privkey.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /static {
-        alias /app/static;
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-}
+# Ensure data directory is writable
+sudo chmod 755 /opt/yourapp/data
 ```
 
 ---
 
-## Cloud Platforms
+## Deploy Script
 
-### Heroku
-
-```bash
-# Procfile
-web: gunicorn wsgi:app -w 4
-```
+Create `scripts/deploy.sh` for one-command deployments:
 
 ```bash
-# Deploy
-heroku create yourapp
-heroku config:set SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
-heroku addons:create heroku-postgresql:mini
-git push heroku main
-heroku run flask db upgrade
+#!/bin/bash
+set -e
+
+# Configuration - customize these
+REMOTE="root@yourapp.com"
+REMOTE_DIR="/opt/yourapp"
+SERVICE="yourapp"
+HEALTH_URL="https://yourapp.com/health"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+CHECK="${GREEN}✓${NC}"
+CROSS="${RED}✗${NC}"
+
+echo ""
+
+# Check for uncommitted changes
+cd "$(git rev-parse --show-toplevel)"
+if [ -n "$(git status --porcelain)" ]; then
+    echo -e "${CROSS} Uncommitted changes. Please commit first."
+    git status --short
+    exit 1
+fi
+echo -e "${CHECK} Working tree clean"
+
+# Push to origin
+git push -q origin master 2>/dev/null || true
+echo -e "${CHECK} Pushed to origin"
+
+# Compare local and remote commits
+LOCAL_COMMIT=$(git rev-parse HEAD)
+REMOTE_COMMIT=$(ssh $REMOTE "cd $REMOTE_DIR && git rev-parse HEAD")
+
+if [ "$LOCAL_COMMIT" = "$REMOTE_COMMIT" ]; then
+    echo -e "${YELLOW}⚡${NC} Already up to date (${LOCAL_COMMIT:0:7})"
+    echo ""
+    exit 0
+fi
+
+echo -e "   Deploying ${LOCAL_COMMIT:0:7} (server has ${REMOTE_COMMIT:0:7})"
+
+# Pull on remote (clean pycache first)
+ssh $REMOTE "cd $REMOTE_DIR && find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null; git pull -q"
+echo -e "${CHECK} Pulled on server"
+
+# Write git SHA for health endpoint
+ssh $REMOTE "cd $REMOTE_DIR && git rev-parse --short HEAD > .git_sha"
+
+# Install dependencies
+ssh $REMOTE "cd $REMOTE_DIR && ./venv/bin/pip install -q -r requirements.txt"
+echo -e "${CHECK} Dependencies updated"
+
+# Restart service
+ssh $REMOTE "systemctl restart $SERVICE"
+echo -e "${CHECK} Service restarted"
+
+# Verify service is running
+sleep 2
+if ssh $REMOTE "systemctl is-active --quiet $SERVICE"; then
+    echo -e "${CHECK} Service running"
+else
+    echo -e "${CROSS} Service failed to start"
+    ssh $REMOTE "journalctl -u $SERVICE -n 20 --no-pager"
+    exit 1
+fi
+
+# Verify health endpoint
+HEALTH_RESPONSE=$(curl -s --max-time 10 "${HEALTH_URL}" || echo '{"status":"error"}')
+STATUS=$(echo "$HEALTH_RESPONSE" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+if [ "$STATUS" = "healthy" ]; then
+    echo -e "${CHECK} Health check passed"
+else
+    echo -e "${CROSS} Health check failed"
+    echo "  Response: ${HEALTH_RESPONSE}"
+    exit 1
+fi
+
+echo ""
+echo -e "${GREEN}Deployed successfully${NC}"
+echo ""
 ```
 
-### Google Cloud Run
+Make it executable:
 
 ```bash
-# Deploy
-gcloud run deploy yourapp \
-    --source . \
-    --platform managed \
-    --region us-central1 \
-    --allow-unauthenticated \
-    --set-env-vars="APP_ENV=production"
+chmod +x scripts/deploy.sh
 ```
 
-### DigitalOcean App Platform
+Usage:
 
-```yaml
-# .do/app.yaml
-name: yourapp
-services:
-  - name: web
-    source:
-      repo: https://github.com/yourorg/yourapp
-      branch: main
-    build_command: pip install -r requirements.txt
-    run_command: gunicorn wsgi:app -w 4
-    envs:
-      - key: SECRET_KEY
-        scope: RUN_TIME
-        type: SECRET
+```bash
+make deploy
+# or
+./scripts/deploy.sh
 ```
 
-### AWS Elastic Beanstalk
+---
 
-```yaml
-# .ebextensions/01_flask.config
-option_settings:
-  aws:elasticbeanstalk:container:python:
-    WSGIPath: wsgi:app
+## Health Check
+
+### Health Endpoint
+
+```python
+# app/controllers/main.py
+import os
+
+@bp.route('/health')
+def health():
+    """Health check endpoint for monitoring."""
+    # Read git SHA if available
+    sha = None
+    sha_file = os.path.join(os.path.dirname(__file__), '../../.git_sha')
+    if os.path.exists(sha_file):
+        with open(sha_file) as f:
+            sha = f.read().strip()
+
+    return {
+        'status': 'healthy',
+        'version': sha
+    }
+```
+
+### API Health (with DB check)
+
+```python
+@bp.route('/api/v1/health')
+def api_health():
+    """API health check with database verification."""
+    from app.extensions import db
+
+    try:
+        # Verify database connection
+        db.session.execute('SELECT 1')
+        db_status = 'connected'
+    except Exception as e:
+        db_status = f'error: {str(e)}'
+
+    sha = None
+    sha_file = os.path.join(os.path.dirname(__file__), '../../.git_sha')
+    if os.path.exists(sha_file):
+        with open(sha_file) as f:
+            sha = f.read().strip()
+
+    return {
+        'status': 'healthy' if db_status == 'connected' else 'degraded',
+        'database': db_status,
+        'version': sha
+    }
 ```
 
 ---
@@ -353,104 +389,77 @@ option_settings:
 
 ### Security
 
-- [ ] `SECRET_KEY` is set and random
-- [ ] `DEBUG=false`
-- [ ] HTTPS enforced (redirect HTTP)
-- [ ] Security headers configured
+- [ ] `SECRET_KEY` is random (use `secrets.token_hex(32)`)
+- [ ] `APP_ENV=production` (not `dev`)
+- [ ] HTTPS enabled (Caddy handles this)
 - [ ] CSRF protection enabled
 - [ ] Rate limiting on auth endpoints
-- [ ] Input validation on all forms
 
 ### Database
 
-- [ ] SQLite: Database file in persistent volume (or PostgreSQL for high traffic)
-- [ ] Migrations applied (`flask db upgrade`)
-- [ ] Backups configured
-- [ ] PostgreSQL: Connection pooling configured (if using Postgres)
-- [ ] Indexes on frequently queried columns
+- [ ] SQLite database in persistent location (`/opt/yourapp/data/`)
+- [ ] Regular backups of database file
+- [ ] Migrations auto-run on startup
 
 ### Application
 
-- [ ] Gunicorn with multiple workers
-- [ ] Health check endpoint (`/health`)
-- [ ] Structured logging (JSON format)
-- [ ] Error tracking (Sentry, etc.)
-- [ ] Request ID tracking
+- [ ] Gunicorn with multiple workers (`-w 4`)
+- [ ] Health check endpoint working
+- [ ] Structured logging enabled
+- [ ] Error tracking configured (optional: Sentry)
 
 ### Infrastructure
 
-- [ ] Reverse proxy (Caddy/Nginx)
-- [ ] SSL/TLS certificate
-- [ ] CDN for static assets
-- [ ] Log aggregation
-- [ ] Monitoring and alerting
-- [ ] Auto-scaling (if needed)
+- [ ] systemd service enabled and running
+- [ ] Caddy configured with domain
+- [ ] SSL certificate active
+- [ ] Firewall configured (only 80, 443, 22)
+- [ ] Log rotation configured
 
----
-
-## Graceful Shutdown
-
-### Signal Handling
-
-Gunicorn handles SIGTERM gracefully by default:
-1. Stop accepting new connections
-2. Wait for workers to finish current requests
-3. Shut down
-
-### Health Check
-
-```python
-# app/controllers/main.py
-
-@bp.route('/health')
-def health():
-    """Health check endpoint for load balancers."""
-    return {'status': 'ok'}
-```
-
-### Database Cleanup
-
-Flask-SQLAlchemy handles connection cleanup automatically when the app context ends.
-
-For explicit cleanup:
-
-```python
-# In app factory
-@app.teardown_appcontext
-def shutdown_session(exception=None):
-    db.session.remove()
-```
-
----
-
-## Systemd Service
-
-For Linux servers without Docker:
-
-```ini
-# /etc/systemd/system/yourapp.service
-[Unit]
-Description=Your Flask App
-After=network.target
-
-[Service]
-User=www-data
-Group=www-data
-WorkingDirectory=/var/www/yourapp
-Environment="PATH=/var/www/yourapp/venv/bin"
-EnvironmentFile=/var/www/yourapp/.env
-ExecStart=/var/www/yourapp/venv/bin/gunicorn wsgi:app -w 4 -b 127.0.0.1:8000
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
+### Backup Strategy
 
 ```bash
-# Enable and start
-sudo systemctl enable yourapp
-sudo systemctl start yourapp
-sudo systemctl status yourapp
+# Simple SQLite backup (add to cron)
+# /etc/cron.daily/backup-yourapp
+#!/bin/bash
+cp /opt/yourapp/data/app.db /backups/yourapp/app-$(date +%Y%m%d).db
+find /backups/yourapp -mtime +7 -delete  # Keep 7 days
+```
+
+---
+
+## Troubleshooting
+
+### Service won't start
+
+```bash
+# Check logs
+sudo journalctl -u yourapp -n 50
+
+# Test manually
+cd /opt/yourapp
+source venv/bin/activate
+python -c "from app import create_app; create_app()"
+```
+
+### Permission errors
+
+```bash
+sudo chown -R www-data:www-data /opt/yourapp
+sudo chmod 755 /opt/yourapp/data
+```
+
+### Caddy not serving
+
+```bash
+# Check Caddy status
+sudo systemctl status caddy
+
+# Check Caddy logs
+sudo journalctl -u caddy -n 50
+
+# Validate Caddyfile
+caddy validate --config /etc/caddy/Caddyfile
 ```
 
 ---
