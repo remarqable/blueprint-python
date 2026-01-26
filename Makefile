@@ -1,34 +1,58 @@
-.PHONY: venv install compile run test clean deploy
+.PHONY: help venv install compile run test clean deploy provision
 
-# Create virtual environment
+help:
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Targets:"
+	@echo "  venv       Create virtual environment and install dependencies"
+	@echo "  install    Install/update dependencies"
+	@echo "  compile    Compile requirements.in to requirements.txt"
+	@echo "  run        Run the application"
+	@echo "  test       Run tests"
+	@echo "  clean      Remove venv and cache files"
+	@echo "  deploy     Deploy the application"
+	@echo "  provision  Show server provisioning instructions"
+
 venv:
+	rm -rf venv
 	python3 -m venv venv
-	@echo "Virtual environment created. Run 'source venv/bin/activate' to activate."
+	./venv/bin/pip install -r requirements.txt
+	@echo "Done. Run 'source venv/bin/activate' to activate."
 
-# Install dependencies
-install: venv
+install:
 	./venv/bin/pip install -r requirements.txt
 
-# Compile requirements.in -> requirements.txt
 compile:
 	./venv/bin/pip install pip-tools
 	./venv/bin/pip-compile requirements.in -o requirements.txt
 
-# Run development server
 run:
 	./venv/bin/python run.py
 
-# Run tests
 test:
 	./venv/bin/pytest tests/ -v
 
-# Remove venv and cached files
 clean:
-	rm -rf venv
+	rm -rf venv *.db
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
 
-# Deploy to production
 deploy:
 	./scripts/deploy.sh
+
+provision:
+	@echo ""
+	@echo "Server Provisioning"
+	@echo "==================="
+	@echo ""
+	@echo "Run this on a fresh Debian/Ubuntu server:"
+	@echo ""
+	@echo "  scp scripts/provision-server.sh root@your-server:/tmp/"
+	@echo "  ssh root@your-server 'bash /tmp/provision-server.sh'"
+	@echo ""
+	@echo "Or with custom config:"
+	@echo ""
+	@echo "  ssh root@your-server"
+	@echo "  APP_NAME=yourapp APP_DOMAIN=yourapp.com bash /tmp/provision-server.sh"
+	@echo ""

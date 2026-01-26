@@ -7,6 +7,7 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [Server Provisioning](#server-provisioning)
 - [Application Entry Points](#application-entry-points)
 - [Environment Variables](#environment-variables)
 - [Local Development](#local-development)
@@ -32,6 +33,63 @@
 - systemd handles restarts, logging, boot
 - No containers, no orchestration complexity
 - Scales to thousands of users on a $12/month droplet
+
+---
+
+## Server Provisioning
+
+Use the provisioning script to set up a fresh server with all dependencies.
+
+### Quick Provision (Recommended)
+
+```bash
+# SSH into your fresh server
+ssh root@your-server.com
+
+# Run provisioning script with your config
+APP_NAME=yourapp \
+APP_DOMAIN=yourapp.com \
+GIT_REPO=https://github.com/yourorg/yourapp.git \
+bash <(curl -sL https://raw.githubusercontent.com/yourorg/blueprint/master/scripts/provision-server.sh)
+```
+
+### What It Installs
+
+- **Python 3** + `python3-venv` (for virtual environments)
+- **Git** (for deployments)
+- **Caddy** (reverse proxy with automatic HTTPS)
+- **UFW firewall** (SSH, HTTP, HTTPS only)
+- **fail2ban** (brute force protection)
+- **Utilities**: htop, ncdu, jq
+
+### Manual Provision
+
+If you prefer to run steps manually:
+
+```bash
+# Update system
+apt update && apt upgrade -y
+
+# Install Python with venv support
+apt install -y python3 python3-venv python3-pip
+
+# Install Git
+apt install -y git
+
+# Install Caddy
+apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+apt update && apt install -y caddy
+
+# Configure firewall
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow ssh
+ufw allow http
+ufw allow https
+ufw enable
+```
 
 ---
 
