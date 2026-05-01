@@ -29,12 +29,20 @@ blueprint-python/
 ├── patterns/
 │   ├── mvc.md                   # Models, Views, Controllers
 │   ├── database.md              # SQLAlchemy, auto-migrations, multi-tenancy
+│   ├── soft-delete.md           # SoftDeleteMixin, query patterns, hard-delete rules
+│   ├── async-processing.md      # Threading, in-memory queues, scheduler thread, asyncio
 │   ├── i18n.md                  # Internationalization
 │   ├── auth.md                  # Magic links, sessions
+│   ├── audit.md                 # Created_by/updated_by audit trail
 │   ├── htmx.md                  # HTMX patterns
 │   ├── frontend.md              # Bootstrap + HTMX
+│   ├── css.md                   # CSS architecture, file layout, naming
+│   ├── colors.md                # Design tokens, CSS variables, dark theme
+│   ├── mobile-navigation.md     # Device detection, mobile templates
+│   ├── module-system.md         # Pluggy-based module loading (optional)
 │   ├── security.md              # CSRF, rate limiting
 │   ├── testing.md               # pytest patterns
+│   ├── typing.md                # mypy --strict patterns
 │   └── deployment.md            # systemd + Caddy on Digital Ocean
 └── README.md                    # This file
 ```

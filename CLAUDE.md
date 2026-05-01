@@ -215,11 +215,19 @@ audit_logging: false  # or true
 ### Pattern Guides
 - [MVC Pattern Guide](patterns/mvc.md) - Models, Views, Controllers in detail
 - [Database Patterns](patterns/database.md) - SQLAlchemy, auto-migrations, multi-tenancy
+- [Soft Delete](patterns/soft-delete.md) - SoftDeleteMixin, query patterns, hard-delete rules
+- [Async Processing](patterns/async-processing.md) - Threads, in-memory queues, scheduler, asyncio
+- [Audit Trail](patterns/audit.md) - created_by / updated_by tracking
 - [i18n Guide](patterns/i18n.md) - Complete internationalization
 - [Auth & Sessions](patterns/auth.md) - Magic links, OAuth, sessions
 - [HTMX Cookbook](patterns/htmx.md) - Interactive patterns
 - [Frontend Guide](patterns/frontend.md) - Bootstrap + HTMX
+- [CSS Architecture](patterns/css.md) - File layout, variables, naming conventions
+- [Color System](patterns/colors.md) - Design tokens, dark theme, CSS variables
+- [Mobile Navigation](patterns/mobile-navigation.md) - Device detection, mobile templates
+- [Module System](patterns/module-system.md) - Pluggy-based plugin loading (optional)
 - [Testing Guide](patterns/testing.md) - pytest patterns
+- [Typing Guide](patterns/typing.md) - mypy --strict patterns
 - [Security Guide](patterns/security.md) - CSRF, rate limiting, security checklist
 - [Deployment Guide](patterns/deployment.md) - systemd + Caddy on Digital Ocean
 
