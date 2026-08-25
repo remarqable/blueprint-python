@@ -57,10 +57,10 @@ Switch to PostgreSQL when you need:
 
 ```bash
 # Switch to PostgreSQL
-DATABASE_URL=postgresql://user:pass@localhost:5432/app
+DATABASE_URL=postgresql+psycopg://user:pass@localhost:5432/app
 
 # Install driver
-pip install psycopg2-binary
+uv add "psycopg[binary]"
 ```
 
 ---
@@ -87,8 +87,8 @@ One process, before any worker starts. In systemd:
 ```ini
 # /etc/systemd/system/yourapp.service
 [Service]
-ExecStartPre=/opt/yourapp/venv/bin/flask db upgrade
-ExecStart=/opt/yourapp/venv/bin/gunicorn -w 4 -b 127.0.0.1:8000 wsgi:app
+ExecStartPre=/opt/yourapp/.venv/bin/flask db upgrade
+ExecStart=/opt/yourapp/.venv/bin/gunicorn -w 4 -b 127.0.0.1:8000 wsgi:app
 ```
 
 `ExecStartPre` runs once and must exit 0, so a failed migration aborts the deploy

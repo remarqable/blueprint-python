@@ -63,7 +63,7 @@ class Config:
 Install the PostgreSQL driver only when you need it:
 
 ```bash
-pip install "psycopg[binary]"
+uv add "psycopg[binary]"
 ```
 
 ---

@@ -569,18 +569,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
       with:
         python-version: '3.11'
 
     - name: Install dependencies
-      run: |
-        pip install -r requirements.txt
-        pip install pytest pytest-cov
+      run: uv sync --locked
 
     - name: Run tests
-      run: pytest --cov=app --cov-report=xml
+      run: uv run pytest --cov=app --cov-report=xml
 
     - name: Upload coverage
       uses: codecov/codecov-action@v3
@@ -594,7 +592,7 @@ jobs:
 #!/bin/sh
 # .git/hooks/pre-commit
 
-pytest tests/ -x -q
+uv run pytest tests/ -x -q
 ```
 
 ---

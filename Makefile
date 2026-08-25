@@ -1,4 +1,4 @@
-.PHONY: help venv install compile css css-watch assets migrate run test test-postgres clean deploy provision
+.PHONY: help install upgrade css css-watch assets migrate run test test-postgres clean deploy provision
 
 TAILWIND_VERSION := v4.1.14
 TAILWIND_BIN := bin/tailwindcss
@@ -9,9 +9,8 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  venv       Create virtual environment and install dependencies"
-	@echo "  install    Install/update dependencies"
-	@echo "  compile    Compile requirements.in to requirements.txt"
+	@echo "  install    Create .venv and install dependencies (uv sync)"
+	@echo "  upgrade    Upgrade all dependencies and update uv.lock"
 	@echo "  assets     Vendor htmx + alpine into app/static/js"
 	@echo "  css        Build Tailwind CSS (commit the output)"
 	@echo "  css-watch  Rebuild Tailwind CSS on change"
@@ -19,22 +18,16 @@ help:
 	@echo "  run        Build CSS, apply migrations, run the application"
 	@echo "  test       Run tests (SQLite in-memory)"
 	@echo "  test-postgres  Run tests against PostgreSQL"
-	@echo "  clean      Remove venv and cache files"
+	@echo "  clean      Remove .venv and cache files"
 	@echo "  deploy     Deploy the application"
 	@echo "  provision  Show server provisioning instructions"
 
-venv:
-	rm -rf venv
-	python3 -m venv venv
-	./venv/bin/pip install -r requirements.txt
-	@echo "Done. Run 'source venv/bin/activate' to activate."
-
 install:
-	./venv/bin/pip install -r requirements.txt
+	uv sync
 
-compile:
-	./venv/bin/pip install pip-tools
-	./venv/bin/pip-compile requirements.in -o requirements.txt
+upgrade:
+	uv lock --upgrade
+	uv sync
 
 $(TAILWIND_BIN):
 	@mkdir -p bin
@@ -63,20 +56,20 @@ assets:
 	@echo "Vendored htmx $(HTMX_VERSION) and alpine $(ALPINE_VERSION)."
 
 migrate:
-	./venv/bin/flask db upgrade
+	uv run flask db upgrade
 
 run: css migrate
-	./venv/bin/python run.py
+	uv run python run.py
 
 test:
-	./venv/bin/pytest tests/ -v
+	uv run pytest tests/ -v
 
 test-postgres:
 	TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/test \
-		./venv/bin/pytest tests/ -v
+		uv run pytest tests/ -v
 
 clean:
-	rm -rf venv bin *.db
+	rm -rf .venv bin *.db
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true

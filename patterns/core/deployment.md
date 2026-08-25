@@ -50,12 +50,12 @@ ssh root@your-server.com
 APP_NAME=yourapp \
 APP_DOMAIN=yourapp.com \
 GIT_REPO=https://github.com/yourorg/yourapp.git \
-bash <(curl -sL https://raw.githubusercontent.com/yourorg/blueprint/master/scripts/provision-server.sh)
+bash <(curl -sL https://raw.githubusercontent.com/yourorg/blueprint/main/scripts/provision-server.sh)
 ```
 
 ### What It Installs
 
-- **Python 3** + `python3-venv` (for virtual environments)
+- **uv** (creates the virtualenv and installs locked dependencies)
 - **Git** (for deployments)
 - **Caddy** (reverse proxy with automatic HTTPS)
 - **UFW firewall** (SSH, HTTP, HTTPS only)
@@ -70,8 +70,9 @@ If you prefer to run steps manually:
 # Update system
 apt update && apt upgrade -y
 
-# Install Python with venv support
-apt install -y python3 python3-venv python3-pip
+# Install uv (system-wide, so root and systemd can find it).
+# uv installs Python itself if the system lacks 3.11+.
+curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
 # Install Git
 apt install -y git
@@ -166,7 +167,6 @@ DATABASE_URL=sqlite:///data/app.db
 
 ```bash
 # Setup
-make venv
 make install
 
 # Run
@@ -190,10 +190,8 @@ cd /opt/yourapp
 # Clone repository
 git clone https://github.com/yourorg/yourapp.git .
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+# Install locked dependencies into .venv (no dev tools on the server)
+uv sync --locked --no-dev
 
 # Create data directory for SQLite
 mkdir -p data
@@ -219,12 +217,12 @@ After=network.target
 User=www-data
 Group=www-data
 WorkingDirectory=/opt/yourapp
-Environment="PATH=/opt/yourapp/venv/bin"
+Environment="PATH=/opt/yourapp/.venv/bin"
 EnvironmentFile=/opt/yourapp/.env
 # Migrations run once here, NOT inside create_app: N workers would race
 # the same Alembic upgrade on boot. Must exit 0 or the unit fails.
-ExecStartPre=/opt/yourapp/venv/bin/flask db upgrade
-ExecStart=/opt/yourapp/venv/bin/gunicorn wsgi:app -w 4 -b 127.0.0.1:8000
+ExecStartPre=/opt/yourapp/.venv/bin/flask db upgrade
+ExecStart=/opt/yourapp/.venv/bin/gunicorn wsgi:app -w 4 -b 127.0.0.1:8000
 Restart=always
 RestartSec=5
 
@@ -319,7 +317,7 @@ fi
 echo -e "${CHECK} Working tree clean"
 
 # Push to origin
-git push -q origin master 2>/dev/null || true
+git push -q origin main 2>/dev/null || true
 echo -e "${CHECK} Pushed to origin"
 
 # Compare local and remote commits
@@ -341,8 +339,8 @@ echo -e "${CHECK} Pulled on server"
 # Write git SHA for health endpoint
 ssh $REMOTE "cd $REMOTE_DIR && git rev-parse --short HEAD > .git_sha"
 
-# Install dependencies
-ssh $REMOTE "cd $REMOTE_DIR && ./venv/bin/pip install -q -r requirements.txt"
+# Install dependencies (exactly what uv.lock pins, no dev tools)
+ssh $REMOTE "cd $REMOTE_DIR && uv sync --locked --no-dev -q"
 echo -e "${CHECK} Dependencies updated"
 
 # Restart service
@@ -499,8 +497,7 @@ sudo journalctl -u yourapp -n 50
 
 # Test manually
 cd /opt/yourapp
-source venv/bin/activate
-python -c "from app import create_app; create_app()"
+uv run python -c "from app import create_app; create_app()"
 ```
 
 ### Permission errors

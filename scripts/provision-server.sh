@@ -8,7 +8,7 @@ set -e
 #
 # Usage:
 #   ssh root@your-server.com
-#   curl -sL https://raw.githubusercontent.com/yourorg/blueprint/master/scripts/provision-server.sh | bash
+#   curl -sL https://raw.githubusercontent.com/yourorg/blueprint/main/scripts/provision-server.sh | bash
 #
 # Or copy and run manually:
 #   scp scripts/provision-server.sh root@your-server.com:/tmp/
@@ -65,11 +65,14 @@ apt-get upgrade -y -qq
 echo -e "${CHECK} System updated"
 
 # ============================================================================
-# 2. Install Python
+# 2. Install Python + uv
 # ============================================================================
-echo -e "${INFO} Installing Python..."
-apt-get install -y -qq python3 python3-venv python3-pip
-echo -e "${CHECK} Python $(python3 --version | cut -d' ' -f2) installed"
+echo -e "${INFO} Installing Python and uv..."
+apt-get install -y -qq python3 curl
+# System-wide so root, deploy scripts, and systemd all find it.
+# uv downloads a managed Python if the system one is older than 3.11.
+curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+echo -e "${CHECK} Python $(python3 --version | cut -d' ' -f2) and uv $(uv --version | cut -d' ' -f2) installed"
 
 # ============================================================================
 # 3. Install Git
@@ -139,13 +142,11 @@ fi
 # ============================================================================
 # 9. Create virtual environment
 # ============================================================================
-if [ -d "$APP_DIR" ] && [ -f "$APP_DIR/requirements.txt" ]; then
-    echo -e "${INFO} Creating virtual environment..."
+if [ -d "$APP_DIR" ] && [ -f "$APP_DIR/pyproject.toml" ]; then
+    echo -e "${INFO} Installing dependencies..."
     cd "$APP_DIR"
-    python3 -m venv venv
-    ./venv/bin/pip install --upgrade pip -q
-    ./venv/bin/pip install -r requirements.txt -q
-    echo -e "${CHECK} Virtual environment created and dependencies installed"
+    uv sync --locked --no-dev -q
+    echo -e "${CHECK} Virtual environment created and locked dependencies installed"
 fi
 
 # ============================================================================
@@ -161,12 +162,12 @@ After=network.target
 User=$APP_USER
 Group=$APP_USER
 WorkingDirectory=$APP_DIR
-Environment="PATH=$APP_DIR/venv/bin"
+Environment="PATH=$APP_DIR/.venv/bin"
 EnvironmentFile=$APP_DIR/.env
 # Migrations run once, before any worker starts. Must exit 0 or the
 # unit fails -- better than serving against a half-migrated schema.
-ExecStartPre=$APP_DIR/venv/bin/flask db upgrade
-ExecStart=$APP_DIR/venv/bin/gunicorn wsgi:app -w 4 -b 127.0.0.1:8000
+ExecStartPre=$APP_DIR/.venv/bin/flask db upgrade
+ExecStart=$APP_DIR/.venv/bin/gunicorn wsgi:app -w 4 -b 127.0.0.1:8000
 Restart=always
 RestartSec=5
 
@@ -210,6 +211,7 @@ echo "============================================"
 echo ""
 echo "Installed:"
 echo "  - Python $(python3 --version | cut -d' ' -f2)"
+echo "  - uv $(uv --version 2>/dev/null | cut -d' ' -f2 || echo 'installed')"
 echo "  - Git $(git --version | cut -d' ' -f3)"
 echo "  - Caddy $(caddy version 2>/dev/null | head -1 || echo 'installed')"
 echo "  - UFW firewall (SSH, HTTP, HTTPS)"
@@ -220,8 +222,8 @@ echo ""
 echo "  1. Clone your repo (if not done):"
 echo "     cd $APP_DIR && git clone YOUR_REPO ."
 echo ""
-echo "  2. Create virtual environment:"
-echo "     make venv"
+echo "  2. Install dependencies:"
+echo "     uv sync --locked --no-dev"
 echo ""
 echo "  3. Create .env file:"
 echo "     cat > $APP_DIR/.env <<EOF"

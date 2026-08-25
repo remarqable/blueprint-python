@@ -412,7 +412,7 @@ def api_user():
 ### Google OAuth Setup
 
 ```python
-# pip install flask-dance
+# uv add flask-dance
 
 from flask_dance.contrib.google import make_google_blueprint, google
 

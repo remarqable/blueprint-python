@@ -73,7 +73,8 @@ search.
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.11+
+- [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`) —
+  manages the virtualenv, the lockfile, and Python 3.11+ itself
 - Make
 
 ### Step 1: Structure
@@ -106,21 +107,36 @@ see [core/frontend.md](patterns/core/frontend.md#design-tokens). Commit the buil
 ### Step 3: Dependencies
 
 ```bash
-cat > requirements.in <<'EOF'
-Flask
-Flask-SQLAlchemy
-Flask-Login
-Flask-Migrate
-SQLAlchemy
-structlog
-python-dotenv
-gunicorn
-pytest
-pytest-cov
+cat > pyproject.toml <<'EOF'
+[project]
+name = "yourapp"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "Flask",
+    "Flask-SQLAlchemy",
+    "Flask-Login",
+    "Flask-Migrate",
+    "SQLAlchemy",
+    "structlog",
+    "python-dotenv",
+    "gunicorn",
+]
+
+[dependency-groups]
+dev = ["pytest", "pytest-cov"]
+
+[tool.uv]
+package = false
 EOF
 
-make venv && source venv/bin/activate && make compile && make install
+make install     # uv sync: creates .venv, writes uv.lock, installs everything
 ```
+
+Commit `uv.lock` — deploys run `uv sync --locked --no-dev`, so the server
+installs exactly what you tested with. No `pip`, no `requirements.txt`, no
+activation: `uv run <cmd>` (used by every Makefile target) resolves the
+project environment from anywhere in the repo.
 
 ### Step 4: Environment
 
@@ -213,7 +229,7 @@ yourapp/
 ├── tests/
 ├── scripts/deploy.sh
 ├── config/local.env
-├── run.py  wsgi.py  Makefile  requirements.in
+├── run.py  wsgi.py  Makefile  pyproject.toml  uv.lock
 ```
 
 ---
@@ -223,6 +239,7 @@ yourapp/
 | Layer | Technology | Rationale |
 |-------|-----------|-----------|
 | Backend | Python 3.11+ / Flask 3.x | Simple, mature, Jinja2 built-in |
+| Packaging | uv | One tool for venv, lockfile, and Python installs |
 | Database | SQLite → PostgreSQL | No server to start; switchable via `DATABASE_URL` |
 | ORM | SQLAlchemy 2.0 | Declarative, portable across both engines |
 | Migrations | Alembic (Flask-Migrate) | Run once at deploy, never in-process |

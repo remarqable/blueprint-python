@@ -27,7 +27,7 @@ fi
 echo -e "${CHECK} Working tree clean"
 
 # Push to origin
-git push -q origin master 2>/dev/null || true
+git push -q origin main 2>/dev/null || true
 echo -e "${CHECK} Pushed to origin"
 
 # Compare local and remote commits
@@ -49,8 +49,8 @@ echo -e "${CHECK} Pulled on server"
 # Write git SHA for health endpoint
 ssh $REMOTE "cd $REMOTE_DIR && git rev-parse --short HEAD > .git_sha"
 
-# Install dependencies
-ssh $REMOTE "cd $REMOTE_DIR && ./venv/bin/pip install -q -r requirements.txt"
+# Install dependencies (exactly what uv.lock pins, no dev tools)
+ssh $REMOTE "cd $REMOTE_DIR && uv sync --locked --no-dev -q"
 echo -e "${CHECK} Dependencies updated"
 
 # Restart service

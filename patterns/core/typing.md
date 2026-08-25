@@ -9,10 +9,10 @@
 
 ```bash
 # Install type checking dependencies
-pip install mypy types-Flask
+uv add --dev mypy types-Flask
 
 # Run type checker on your module
-mypy app/
+uv run mypy app/
 
 # Run on entire codebase
 mypy app/

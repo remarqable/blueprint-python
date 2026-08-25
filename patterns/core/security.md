@@ -203,7 +203,7 @@ def api_data():
 ### Production: Use Redis
 
 ```python
-# pip install flask-limiter redis
+# uv add flask-limiter redis
 
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
