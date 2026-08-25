@@ -15,3 +15,10 @@ gunicorn
 # Testing
 pytest
 pytest-cov
+
+# --- Optional: uncomment as needed ---
+# psycopg[binary]      # PostgreSQL driver (database: postgres)
+# Flask-Limiter        # rate limiting beyond the in-memory limiter
+# Flask-Dance          # OAuth providers (core/auth.md)
+
+# --- Dev tooling (install separately: pip install -r requirements-dev.in) ---

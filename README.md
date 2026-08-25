@@ -1,101 +1,102 @@
 # Blueprint-Python
 
-> Documentation blueprint for building production-ready Flask SaaS applications with MVC pattern.
+> A documentation blueprint for building production-ready Flask SaaS
+> applications — MVC, multi-tenancy, plugins, theming, i18n, and deployment.
 
-## What is This?
+Point an AI agent (or a developer) at this repo and get a consistent, working
+Flask application instead of a pile of plausible-looking code.
 
-This is a **documentation-only blueprint** that guides AI agents and developers in building Flask applications following best practices. It contains no actual code - just comprehensive guides on architecture, patterns, and implementation.
+## What This Is
+
+Documentation, not a framework. There is no package to install and no code to
+import — just a set of patterns precise enough to build from, with the failure
+modes called out where they bite.
 
 ## Quick Start
 
-When starting a new project, have Claude read:
+Point Claude at [CLAUDE.md](CLAUDE.md). It will ask five configuration questions,
+record the answers, and build from there.
 
-1. `CLAUDE.md` - Master blueprint with Quick Start section
-2. `patterns/*.md` - Detailed implementation guides (as needed)
-
-The AI agent will ask you:
-- **B2C or B2B?** - Determines multi-tenancy model (user-based or organization-based)
-- **Audit logging?** - Whether to track who changed what
+```bash
+git submodule add https://github.com/remarqable/blueprint-python.git blueprint
+# then in your project's CLAUDE.md:
+#   See blueprint/CLAUDE.md for architecture patterns.
+```
 
 ## Structure
 
+One architecture, plus layers you opt into. Read all of `core/`; read a layer
+only when its condition holds.
+
 ```
 blueprint-python/
-├── CLAUDE.md                    # Master blueprint - read this first
-├── Makefile                     # venv, install, compile, run, test, clean, deploy
-├── requirements.in              # Package names (no versions)
-├── scripts/
-│   └── deploy.sh                # Production deployment script
+├── CLAUDE.md                      # master blueprint — start here
 ├── patterns/
-│   ├── mvc.md                   # Models, Views, Controllers
-│   ├── database.md              # SQLAlchemy, auto-migrations, multi-tenancy
-│   ├── i18n.md                  # Internationalization
-│   ├── auth.md                  # Magic links, sessions
-│   ├── htmx.md                  # HTMX patterns
-│   ├── frontend.md              # Bootstrap + HTMX
-│   ├── security.md              # CSRF, rate limiting
-│   ├── testing.md               # pytest patterns
-│   └── deployment.md            # systemd + Caddy on Digital Ocean
-└── README.md                    # This file
+│   ├── core/                      # applies to every project
+│   │   ├── mvc.md                 # models, views, controllers
+│   │   ├── database.md            # SQLAlchemy conventions, migrations
+│   │   ├── portability.md         # SQLite ↔ PostgreSQL
+│   │   ├── auth.md                # magic links, OAuth, sessions
+│   │   ├── security.md            # CSRF, rate limiting, checklist
+│   │   ├── i18n.md   htmx.md   frontend.md   mobile-navigation.md
+│   │   ├── testing.md   typing.md   audit.md
+│   │   └── deployment.md          # systemd + Gunicorn + Caddy
+│   ├── tenancy.md                 # layer: tenancy: shared
+│   ├── plugins.md                 # layer: plugins: true
+│   └── theming.md                 # layer: theming: true
+├── scripts/                       # deploy.sh, provision-server.sh
+└── Makefile
 ```
+
+## Configuration
+
+The blueprint asks five questions up front, because they change the generated
+code:
+
+| Question | Setting |
+|----------|---------|
+| Will data ever be shared between users? | `tenancy: shared \| personal` |
+| Do tenants install optional features? | `plugins` |
+| Do tenants customize the UI? | `theming` |
+| Track who changed what? | `audit_logging` |
+| SQLite or PostgreSQL? | `database` |
+
+The first one is the one people get wrong. It is not "B2C or B2B?" — that asks
+about your go-to-market label rather than your data model. Adding `org_id` later
+means backfilling an organization per user and rewriting every query and
+permission check; carrying it from day one costs one indexed column.
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
 | Backend | Python 3.11+ / Flask 3.x |
-| Database | SQLite (default) / PostgreSQL |
+| Database | SQLite (default) → PostgreSQL, switchable via `DATABASE_URL` |
 | ORM | SQLAlchemy 2.0 |
-| Migrations | Alembic (auto-run at startup) |
-| Templates | Jinja2 |
-| Frontend | Bootstrap 5 + HTMX |
-| Testing | pytest |
-| Server | Gunicorn + systemd |
-| Reverse Proxy | Caddy (automatic HTTPS) |
+| Migrations | Alembic, applied at deploy |
+| Frontend | Bootstrap 5 + HTMX, no build pipeline |
+| Testing | pytest — SQLite in-memory locally, PostgreSQL in CI |
+| Serving | Gunicorn + systemd + Caddy (automatic HTTPS) |
 
 ## Philosophy
 
-- **Keep it simple** - No over-engineering
-- **MVC Pattern** - Fat models, thin controllers
-- **Server-rendered HTML** - HTMX for interactivity
-- **No build pipeline** - No npm, webpack, etc.
-- **SQLite by default** - No database server needed
-- **Auto-migrations** - Run at startup, no manual steps
-- **i18n from day 1** - Global-ready
-
-## Makefile Targets
-
-```bash
-make venv      # Create virtual environment
-make install   # Install dependencies
-make compile   # Compile requirements.in -> requirements.txt
-make run       # Run development server
-make test      # Run tests
-make clean     # Remove venv and cached files
-make deploy    # Deploy to production
-```
+- **Keep it simple, explicit, and local.** No magic.
+- **Fat models, thin controllers, dumb templates.**
+- **Server-rendered HTML + HTMX.** No SPA, no npm.
+- **Safe by default.** Tenant isolation is enforced in one place, not remembered
+  in every query.
+- **SQLite by default.** PostgreSQL is one environment variable away.
+- **i18n from day 1.**
 
 ## Deployment
 
-Single VPS deployment with:
-- **Digital Ocean Droplet** (or any VPS)
-- **systemd** for process management
-- **Gunicorn** as WSGI server
-- **Caddy** for reverse proxy + automatic HTTPS
-
-No Docker, no containers, no orchestration complexity.
-
-## Usage as Submodule
+A single VPS: systemd for process management, Gunicorn as the WSGI server, Caddy
+for reverse proxy and automatic HTTPS. No Docker, no orchestration.
 
 ```bash
-# Add to your project
-git submodule add https://github.com/remarqable/blueprint-python.git blueprint
-
-# Point Claude to it
-# In your project's CLAUDE.md:
-# "See blueprint/CLAUDE.md for architecture patterns"
+make deploy
 ```
 
 ## License
 
-Copyright (c) Your Organization.
+MIT — see [LICENSE](LICENSE).

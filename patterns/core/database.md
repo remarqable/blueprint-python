@@ -1,6 +1,7 @@
 # Database Patterns
 
-> SQLite by default (local and production), PostgreSQL-compatible conventions, auto-migrations at runtime
+> SQLite by default, PostgreSQL when you outgrow it, switchable via DATABASE_URL.
+> Engine differences: [portability.md](portability.md)
 
 ---
 
@@ -64,54 +65,61 @@ pip install psycopg2-binary
 
 ---
 
-## Auto-Migrations
+## Migrations
 
-**Migrations run automatically at startup.** No manual `flask db upgrade` needed.
+Migrations run **once, before the app starts** -- not inside `create_app`.
 
-### How It Works
+### Why not at startup
+
+Running `upgrade()` in the application factory looks convenient and breaks under
+the only deployment that matters. With N Gunicorn workers, all N boot at once and
+race the same Alembic upgrade against the same database, with no advisory lock on
+SQLite. You get partially applied migrations, `database is locked`, or a
+corrupted `alembic_version` -- intermittently, under load, on deploy.
+
+It also makes the test suite lie: `create_app()` upgrades whatever database the
+config points at *before* a fixture can redirect it.
+
+### Where they belong
+
+One process, before any worker starts. In systemd:
+
+```ini
+# /etc/systemd/system/yourapp.service
+[Service]
+ExecStartPre=/opt/yourapp/venv/bin/flask db upgrade
+ExecStart=/opt/yourapp/venv/bin/gunicorn -w 4 -b 127.0.0.1:8000 wsgi:app
+```
+
+`ExecStartPre` runs once and must exit 0, so a failed migration aborts the deploy
+instead of starting a server against a half-migrated schema. `scripts/deploy.sh`
+does the same for the non-systemd path.
+
+For local development, `make run` runs `flask db upgrade` before `run.py` -- a
+single process, so the race cannot occur.
+
+If you truly want migrations in-process (single-worker containers, say), gate it
+explicitly and leave it off by default:
 
 ```python
-# app/__init__.py
-from flask import Flask
-from flask_migrate import upgrade
-from .extensions import db, migrate
-
-
-def create_app(config_class=Config):
-    app = Flask(__name__)
-    app.config.from_object(config_class)
-
-    db.init_app(app)
-    migrate.init_app(app, db)
-
-    # Auto-run migrations on startup
+if app.config.get('RUN_MIGRATIONS_ON_STARTUP'):
     with app.app_context():
         upgrade()
-
-    # ... rest of app setup
-    return app
 ```
 
-### Creating New Migrations
-
-When you change models, create a migration:
+### Creating migrations
 
 ```bash
-# Generate migration from model changes
-flask db migrate -m "Add user preferences"
-
-# Review the generated migration in migrations/versions/
-# Commit to git
+flask db migrate -m "Add user preferences"    # generate from model changes
+flask db upgrade                              # apply locally
 ```
 
-The migration will auto-apply next time the app starts (locally or in production).
-
-### Migration Best Practices
-
-1. **Always review generated migrations** before committing
-2. **Keep migrations small** - one logical change per migration
-3. **Test migrations locally** before deploying
-4. **Never edit applied migrations** - create new ones to fix issues
+1. **Always review generated migrations** before committing -- autogenerate
+   misses table renames, CHECK constraints, and server defaults.
+2. **Keep them small** -- one logical change each.
+3. **Never edit an applied migration** -- write a new one.
+4. **Use `batch_alter_table`** so migrations work on SQLite:
+   [portability.md](portability.md#migrations-that-run-on-both).
 
 ---
 
@@ -128,30 +136,51 @@ The migration will auto-apply next time the app starts (locally or in production
 
 ```python
 # app/models/base.py
-from datetime import datetime
+from datetime import datetime, timezone
+import sqlalchemy as sa
 from app.extensions import db
+from app.models.types import BigIntPK
+
+
+def utcnow() -> datetime:
+    """Timezone-aware UTC now. Never use datetime.utcnow() -- it is deprecated
+    in Python 3.12+ and returns a naive datetime that claims to be UTC."""
+    return datetime.now(timezone.utc)
 
 
 class BaseModel(db.Model):
     """Base model with common fields."""
     __abstract__ = True
 
-    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
-                           onupdate=datetime.utcnow)
+    # BigIntPK is BIGINT on PostgreSQL, INTEGER on SQLite. A plain BigInteger
+    # primary key does NOT autoincrement on SQLite and every INSERT fails with
+    # "NOT NULL constraint failed". See core/portability.md.
+    id = db.Column(BigIntPK, primary_key=True, autoincrement=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False,
+                           default=utcnow, onupdate=utcnow)
 
     def save(self):
-        """Save instance to database."""
+        """Validate and persist. Commits immediately -- for multi-step
+        operations use transaction() instead so they stay atomic."""
+        if hasattr(self, 'validate'):
+            self.validate()
         db.session.add(self)
         db.session.commit()
         return self
 
     def delete(self):
-        """Delete instance from database."""
         db.session.delete(self)
         db.session.commit()
+
+    @classmethod
+    def get_by_id(cls, id: int):
+        return db.session.get(cls, id)      # Query.get() is legacy in SQLAlchemy 2.0
 ```
+
+> **Constraint naming is not optional.** Set the naming convention before your
+> first migration -- SQLite's table-copy ALTER cannot recreate constraints it
+> cannot name. See [portability.md](portability.md#migrations-that-run-on-both).
 
 ### User Model
 
@@ -186,125 +215,47 @@ class User(BaseModel):
 
 ## Multi-Tenancy
 
-> **Blueprint Configuration:** This section depends on your app type (B2C or B2B).
-> See [Project Configuration](#project-configuration) in CLAUDE.md for your app's settings.
+Which ownership column your models carry depends on the `tenancy` setting in
+[Project Configuration](../../CLAUDE.md#project-configuration).
 
-### B2C: User-Owned Data
+### Shared (default): organization-owned
 
-Each user owns their own data. Simple foreign key approach.
+Business tables inherit `OrgScoped` and are filtered by the current tenant
+automatically. **Read [tenancy.md](../tenancy.md)** -- the model, tenant
+resolution, and the session-level filter that makes cross-tenant leaks
+structurally impossible all live there.
 
 ```python
-# app/models/setting.py
+class Project(OrgScoped, BaseModel):
+    __tablename__ = 'project'
+    name = db.Column(db.String(200), nullable=False)
+```
+
+### Personal: user-owned
+
+For apps where data is never shared between users. Do not read tenancy.md.
+
+```python
 class Setting(BaseModel):
-    """User setting (key-value)."""
     __tablename__ = 'setting'
 
-    user_id = db.Column(db.BigInteger, db.ForeignKey('user.id'), nullable=False, index=True)
+    user_id = db.Column(BigIntFK, db.ForeignKey('user.id', ondelete='CASCADE'),
+                        nullable=False, index=True)
     key = db.Column(db.String(100), nullable=False)
-    value = db.Column(db.Text)
+    value = db.Column(db.Text, nullable=False, default='')
 
-    # Ensure unique key per user
-    __table_args__ = (db.UniqueConstraint('user_id', 'key'),)
-
-    # Relationship
-    user = db.relationship('User', backref='settings')
+    __table_args__ = (db.UniqueConstraint('user_id', 'key', name='uq_setting_user_key'),)
 
     @classmethod
-    def for_user(cls, user_id: int):
-        """Get all settings for a user."""
-        return cls.query.filter_by(user_id=user_id).all()
-
-    @classmethod
-    def get(cls, user_id: int, key: str, default=None):
-        """Get a setting value."""
+    def get_value(cls, user_id: int, key: str, default: str = '') -> str:
         setting = cls.query.filter_by(user_id=user_id, key=key).first()
         return setting.value if setting else default
-
-    @classmethod
-    def set(cls, user_id: int, key: str, value: str):
-        """Set a setting value."""
-        setting = cls.query.filter_by(user_id=user_id, key=key).first()
-        if setting:
-            setting.value = value
-        else:
-            setting = cls(user_id=user_id, key=key, value=value)
-        return setting.save()
 ```
 
-### B2B: Organization-Based
-
-Users belong to organizations. All data is scoped to an organization.
-
-```python
-# app/models/organization.py
-class Organization(BaseModel):
-    """Organization (tenant)."""
-    __tablename__ = 'organization'
-
-    name = db.Column(db.String(100), nullable=False)
-    slug = db.Column(db.String(100), unique=True, nullable=False, index=True)
-    is_active = db.Column(db.Boolean, default=True, nullable=False)
-
-
-# app/models/user.py
-class User(BaseModel):
-    """User belonging to an organization."""
-    __tablename__ = 'user'
-
-    org_id = db.Column(db.BigInteger, db.ForeignKey('organization.id'), nullable=False, index=True)
-    email = db.Column(db.String(255), nullable=False, index=True)
-    name = db.Column(db.String(100), nullable=False)
-    role = db.Column(db.String(20), default='member', nullable=False)  # owner, admin, member
-
-    # Unique email per organization
-    __table_args__ = (db.UniqueConstraint('org_id', 'email'),)
-
-    # Relationship
-    organization = db.relationship('Organization', backref='users')
-
-
-# app/models/base.py - for org-scoped models
-class OrgScopedModel(BaseModel):
-    """Base for organization-scoped models."""
-    __abstract__ = True
-
-    org_id = db.Column(db.BigInteger, db.ForeignKey('organization.id'), nullable=False, index=True)
-```
-
-### Query Helper (B2B)
-
-```python
-# app/platform/tenant.py
-from flask import g
-from functools import wraps
-
-
-def get_current_org_id() -> int:
-    """Get current organization ID from request context."""
-    return g.get('org_id')
-
-
-def org_scope(f):
-    """Decorator to ensure org_id is set in queries."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not get_current_org_id():
-            raise ValueError("No organization context set")
-        return f(*args, **kwargs)
-    return decorated
-
-
-# Usage in model
-class Project(OrgScopedModel):
-    __tablename__ = 'project'
-
-    name = db.Column(db.String(200), nullable=False)
-
-    @classmethod
-    def for_org(cls):
-        """Get all projects for current org."""
-        return cls.query.filter_by(org_id=get_current_org_id()).all()
-```
+> Choosing between them is about the future, not your go-to-market label: **will
+> data ever be shared between users?** Retrofitting `org_id` means backfilling an
+> organization per user and rewriting every query and permission check. Carrying
+> it from day one costs one column.
 
 ---
 
@@ -314,8 +265,8 @@ class Project(OrgScopedModel):
 
 ```python
 # Get by ID
-user = User.query.get(1)
-user = User.query.get_or_404(1)
+user = db.session.get(User, 1)          # Query.get() is legacy in 2.0
+user = db.get_or_404(User, 1)
 
 # Filter
 user = User.query.filter_by(email='alice@example.com').first()
@@ -424,14 +375,14 @@ class User(BaseModel):
     __tablename__ = 'user'
 
     email = db.Column(db.String(255), unique=True, nullable=False)
-    metadata = db.Column(JSONB, default=dict)  # Flexible JSON storage
+    meta = db.Column(JSONColumn, default=dict)   # NOT 'metadata': reserved by Declarative
 ```
 
 ```python
 # Querying JSONB
-users = User.query.filter(User.metadata['role'].astext == 'admin').all()
-users = User.query.filter(User.metadata.has_key('verified')).all()
-users = User.query.filter(User.metadata.contains({'active': True})).all()
+users = User.query.filter(User.meta['role'].astext == 'admin').all()
+users = User.query.filter(User.meta.has_key('verified')).all()
+users = User.query.filter(User.meta.contains({'active': True})).all()
 ```
 
 ### Full-Text Search

@@ -56,7 +56,8 @@ _magic_links = {}
 
 ```python
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
+from app.models.base import utcnow
 
 
 def create_magic_link(email: str, expiry_minutes: int = 15) -> str:
@@ -73,7 +74,7 @@ def create_magic_link(email: str, expiry_minutes: int = 15) -> str:
 
     _magic_links[token] = {
         'email': email.lower().strip(),
-        'expires_at': datetime.utcnow() + timedelta(minutes=expiry_minutes),
+        'expires_at': utcnow() + timedelta(minutes=expiry_minutes),
         'used': False,
     }
 
@@ -94,7 +95,7 @@ def validate_magic_link(token: str) -> tuple[bool, str]:
     if link_data['used']:
         return False, 'Link already used'
 
-    if datetime.utcnow() > link_data['expires_at']:
+    if utcnow() > link_data['expires_at']:
         return False, 'Link expired'
 
     # Mark as used
@@ -107,7 +108,8 @@ def validate_magic_link(token: str) -> tuple[bool, str]:
 
 ```python
 # app/models/magic_link.py
-from datetime import datetime, timedelta
+from datetime import timedelta
+from app.models.base import utcnow
 import secrets
 from app.extensions import db
 from app.models.base import BaseModel
@@ -118,15 +120,15 @@ class MagicLink(BaseModel):
 
     token = db.Column(db.String(100), unique=True, nullable=False, index=True)
     email = db.Column(db.String(255), nullable=False)
-    expires_at = db.Column(db.DateTime, nullable=False)
-    used_at = db.Column(db.DateTime, nullable=True)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    used_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     @classmethod
     def create(cls, email: str, expiry_minutes: int = 15) -> 'MagicLink':
         link = cls(
             token=secrets.token_urlsafe(48),
             email=email.lower().strip(),
-            expires_at=datetime.utcnow() + timedelta(minutes=expiry_minutes),
+            expires_at=utcnow() + timedelta(minutes=expiry_minutes),
         )
         return link.save()
 
@@ -138,10 +140,10 @@ class MagicLink(BaseModel):
             return False, 'Invalid link'
         if link.used_at:
             return False, 'Link already used'
-        if datetime.utcnow() > link.expires_at:
+        if utcnow() > link.expires_at:
             return False, 'Link expired'
 
-        link.used_at = datetime.utcnow()
+        link.used_at = utcnow()
         link.save()
 
         return True, link.email
@@ -149,7 +151,7 @@ class MagicLink(BaseModel):
     @classmethod
     def cleanup_expired(cls):
         """Remove expired links (run periodically)."""
-        cls.query.filter(cls.expires_at < datetime.utcnow()).delete()
+        cls.query.filter(cls.expires_at < utcnow()).delete()
         db.session.commit()
 ```
 
@@ -240,7 +242,8 @@ class User(BaseModel, UserMixin):
 """Authentication controller."""
 
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
+from app.models.base import utcnow
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, current_app
 from flask_login import login_user, logout_user, current_user
 from app.models import User
@@ -305,7 +308,7 @@ def verify_magic(token: str):
         flash(t('auth.link_already_used'), 'error')
         return redirect(url_for('auth.login'))
 
-    if datetime.utcnow() > link_data['expires_at']:
+    if utcnow() > link_data['expires_at']:
         flash(t('auth.link_expired'), 'error')
         return redirect(url_for('auth.login'))
 
@@ -347,7 +350,7 @@ def _create_magic_link(email: str) -> str:
 
     _magic_links[token] = {
         'email': email,
-        'expires_at': datetime.utcnow() + timedelta(minutes=15),
+        'expires_at': utcnow() + timedelta(minutes=15),
         'used': False,
     }
 
@@ -467,6 +470,20 @@ def google_authorized():
 - [x] Rate limit login attempts
 - [x] Log auth events
 - [x] HTTPS in production
+
+---
+
+## Time Handling
+
+All expiry timestamps use `utcnow()` from `app/models/base.py`, and all datetime
+columns are declared `DateTime(timezone=True)`.
+
+Mixing the two conventions is a live bug rather than a style question: comparing
+a naive `datetime.utcnow()` against a timezone-aware column raises
+`TypeError: can't compare offset-naive and offset-aware datetimes` on PostgreSQL,
+while SQLite silently compares them wrong and expires tokens at the offset
+between your server's clock and UTC. See
+[portability.md](portability.md#timestamps).
 
 ---
 

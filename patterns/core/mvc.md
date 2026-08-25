@@ -45,8 +45,9 @@
 # app/models/base.py
 """Base model with common fields and methods."""
 
-from datetime import datetime
 from app.extensions import db
+from app.models.base import utcnow
+from app.models.types import BigIntPK
 
 
 class BaseModel(db.Model):
@@ -54,13 +55,16 @@ class BaseModel(db.Model):
 
     __abstract__ = True
 
-    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
-                           onupdate=datetime.utcnow)
+    # BIGINT primary keys do not autoincrement on SQLite -- BigIntPK applies the
+    # required variant. See core/portability.md.
+    id = db.Column(BigIntPK, primary_key=True, autoincrement=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False,
+                           default=utcnow, onupdate=utcnow)
 
     def save(self):
-        """Save model to database."""
+        """Validate and persist. Commits immediately -- wrap multi-step
+        operations in transaction() so they stay atomic."""
         if hasattr(self, 'validate'):
             self.validate()
         db.session.add(self)
@@ -75,13 +79,13 @@ class BaseModel(db.Model):
     @classmethod
     def get_by_id(cls, id: int):
         """Get record by ID."""
-        return cls.query.get(id)
+        return db.session.get(cls, id)
 
     @classmethod
     def get_or_404(cls, id: int):
         """Get record by ID or raise 404."""
         from app.platform.errors import NotFoundError
-        record = cls.query.get(id)
+        record = db.session.get(cls, id)
         if record is None:
             raise NotFoundError(f'{cls.__name__} not found')
         return record
@@ -129,7 +133,9 @@ class User(BaseModel, UserMixin):
         if len(self.name) > 100:
             raise ValidationError('Name too long (max 100 chars)')
 
-        # Check email uniqueness
+        # Friendly duplicate check. This races under concurrency -- the
+        # unique constraint on email is the real guarantee, so controllers
+        # must also catch IntegrityError.
         existing = User.query.filter_by(email=self.email).first()
         if existing and existing.id != self.id:
             raise ValidationError('Email already registered')

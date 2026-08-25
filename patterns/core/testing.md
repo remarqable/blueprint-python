@@ -117,24 +117,26 @@ pytest -x
 
 import pytest
 from app import create_app
+from app.config import TestConfig
 from app.extensions import db
 from app.models import User, Setting
 
 
 @pytest.fixture
 def app():
-    """Create application for testing."""
-    app = create_app()
-    app.config.update({
-        'TESTING': True,
-        'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
-        'WTF_CSRF_ENABLED': False,
-        'SERVER_NAME': 'localhost',
-    })
+    """Create application for testing.
+
+    Config is passed INTO create_app, never assigned afterwards:
+    Flask-SQLAlchemy binds its engine during init_app, so a later
+    SQLALCHEMY_DATABASE_URI assignment is ignored and the whole suite
+    silently runs against your development database.
+    """
+    app = create_app(TestConfig)
 
     with app.app_context():
         db.create_all()
         yield app
+        db.session.remove()
         db.drop_all()
 
 
@@ -598,3 +600,27 @@ pytest tests/ -x -q
 ---
 
 **Next:** [Deployment](deployment.md) | [Security](security.md)
+
+
+---
+
+## Test Configuration
+
+```python
+# app/config.py
+class TestConfig(Config):
+    TESTING = True
+    SQLALCHEMY_DATABASE_URI = os.environ.get('TEST_DATABASE_URL', 'sqlite:///:memory:')
+    IS_SQLITE = SQLALCHEMY_DATABASE_URI.startswith('sqlite')
+    IS_POSTGRES = SQLALCHEMY_DATABASE_URI.startswith('postgresql')
+    SECRET_KEY = 'test-secret'
+    CSRF_ENABLED = False          # this app hand-rolls CSRF; see security.md
+    RUN_MIGRATIONS_ON_STARTUP = False
+    SERVER_NAME = 'localhost'
+```
+
+`CSRF_ENABLED` is our own flag. `WTF_CSRF_ENABLED` is Flask-WTF configuration and
+does nothing here -- setting it leaves CSRF on and every POST test returns 403.
+
+Run the suite against PostgreSQL too:
+[portability.md § Testing Against Both](portability.md#testing-against-both).

@@ -163,6 +163,9 @@ Group=$APP_USER
 WorkingDirectory=$APP_DIR
 Environment="PATH=$APP_DIR/venv/bin"
 EnvironmentFile=$APP_DIR/.env
+# Migrations run once, before any worker starts. Must exit 0 or the
+# unit fails -- better than serving against a half-migrated schema.
+ExecStartPre=$APP_DIR/venv/bin/flask db upgrade
 ExecStart=$APP_DIR/venv/bin/gunicorn wsgi:app -w 4 -b 127.0.0.1:8000
 Restart=always
 RestartSec=5

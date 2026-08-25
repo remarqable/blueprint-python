@@ -1,259 +1,172 @@
-# CLAUDE.md - Flask SaaS Blueprint (MVC Pattern)
+# CLAUDE.md — Flask SaaS Blueprint
 
-> **Master guide for bootstrapping production-ready Flask SaaS applications.**
-> Single-file blueprint combining architecture, MVC patterns, database setup, i18n, security, and deployment.
-> Optimized for **fast iteration**, **clean code**, and **AI agent execution**.
+> Production-ready Flask SaaS applications: MVC, multi-tenancy, plugins, i18n,
+> and deployment. Optimized for fast iteration, clean code, and AI agent execution.
 
 ---
 
-## 🚀 QUICK START (New Project Bootstrap)
+## ⚠️ READ THIS FIRST: Scoped Reading
 
-**👉 AI Agents: Execute this section first**
+This blueprint describes **one architecture with optional layers** — never two
+alternatives to blend. Reading a layer that does not apply to the project
+produces code that does not run.
 
-### Step 0: Ask Configuration Questions
+1. Establish the [Project Configuration](#project-configuration) below.
+2. Read **all of `patterns/core/`** — it applies to every project.
+3. Read a **layer doc only if its condition is met.**
 
-Before creating any files, ask the user these questions:
+**Never read both branches of the same decision in one session.** If
+`tenancy: personal`, do not open `patterns/tenancy.md` at all — not for
+reference, not for context.
 
-**1. App Type** (determines multi-tenancy model)
-- **B2C (User-based)**: Each user owns their own data. Use `user_id` foreign keys.
-- **B2B (Organization-based)**: Users belong to organizations. Use `org_id` foreign keys.
+| Layer doc | Read only when |
+|-----------|----------------|
+| `patterns/tenancy.md` | `tenancy: shared` |
+| `patterns/plugins.md` | `plugins: true` (requires `tenancy: shared` for the per-tenant model) |
+| `patterns/theming.md` | `theming: true` |
 
-**2. Audit Logging**
-- **No audit**: Simple apps. Just `created_at`/`updated_at` timestamps.
-- **Yes, add audit**: Track `created_by`, `updated_by` on models.
+---
 
-Record the answers in the Project Configuration section below.
+## 📋 Project Configuration
 
-### Prerequisites Checklist
-- [ ] Python 3.11+
-- [ ] Make
+> **AI Agents:** Ask the questions below before creating any files, then record
+> the answers here. This block is authoritative for everything that follows.
 
-### Bootstrap Sequence (Follow in Order)
+```yaml
+tenancy: shared        # shared | personal
+plugins: false         # true | false
+theming: false         # true | false
+audit_logging: false   # true | false
+database: sqlite       # sqlite | postgres  (switchable later via DATABASE_URL)
+```
 
-**Step 1: Initialize Project**
+### The questions to ask
+
+**1. Will data ever be shared between users?**
+
+- **Yes → `tenancy: shared`** (default). Users belong to organizations; business
+  tables carry `org_id`. Covers every B2B app, and every B2C app that might one
+  day add teams, sharing, or collaboration.
+- **No → `tenancy: personal`.** Data belongs to one user and never to a group.
+  A personal notes app, a private finance tracker.
+
+Ask it this way rather than "B2C or B2B?" — that asks about your go-to-market
+label, not your data model. Retrofitting `org_id` later means backfilling an
+organization per user and rewriting every query and every permission check.
+Carrying it from day one costs one indexed column. **When unsure, choose
+`shared`.**
+
+**2. Do tenants need to install optional features?** → `plugins`
+
+**3. Do tenants need to customize the UI?** → `theming`
+
+**4. Track who changed what?** → `audit_logging` (adds `created_by`/`updated_by`)
+
+**5. SQLite or PostgreSQL?** → `database`. SQLite is the default and is a
+one-variable switch later, provided you follow
+[core/portability.md](patterns/core/portability.md). Choose PostgreSQL now only
+if you already know you need high write concurrency, JSONB querying, or full-text
+search.
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.11+
+- Make
+
+### Step 1: Structure
+
 ```bash
 mkdir yourapp && cd yourapp
-
-# Create folder structure
 mkdir -p app/{models,controllers,views/{layouts,partials,users,settings,errors},static/{css,js,img},lang,middleware,platform}
-mkdir -p migrations/versions tests/{test_models,test_controllers} config patterns scripts
+mkdir -p migrations/versions tests/{test_models,test_controllers} config scripts
 touch app/__init__.py app/models/__init__.py app/controllers/__init__.py
 touch app/middleware/__init__.py app/platform/__init__.py
 ```
-✅ **Verify:** `ls app` shows folder structure
 
-**Step 2: Create requirements.in**
+If `plugins: true`, also `mkdir -p plugins`.
+If `theming: true`, also `mkdir -p app/views/themes`.
+
+### Step 2: Dependencies
+
 ```bash
-cat > requirements.in <<EOF
-# Core
+cat > requirements.in <<'EOF'
 Flask
 Flask-SQLAlchemy
 Flask-Login
 Flask-Migrate
 SQLAlchemy
-
-# Utilities
 structlog
 python-dotenv
-
-# Production server
 gunicorn
-
-# Testing
 pytest
 pytest-cov
 EOF
+
+make venv && source venv/bin/activate && make compile && make install
 ```
 
-**Step 3: Create Makefile**
-```makefile
-.PHONY: venv install compile run test clean deploy
+### Step 3: Environment
 
-venv:
-	python3 -m venv venv
-	@echo "Run 'source venv/bin/activate' to activate."
-
-install: venv
-	./venv/bin/pip install -r requirements.txt
-
-compile:
-	./venv/bin/pip install pip-tools
-	./venv/bin/pip-compile requirements.in -o requirements.txt
-
-run:
-	./venv/bin/python run.py
-
-test:
-	./venv/bin/pytest tests/ -v
-
-clean:
-	rm -rf venv
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-
-deploy:
-	./scripts/deploy.sh
-```
-
-**Step 4: Setup Environment**
 ```bash
-# Create virtual environment and install
-make venv
-source venv/bin/activate
-make compile
-make install
-
-# Create config/local.env
-cat > config/local.env <<EOF
+cat > config/local.env <<'EOF'
 APP_ENV=dev
 PORT=8000
 DATABASE_URL=sqlite:///app.db
 SECRET_KEY=dev-secret-change-in-production
 DEV_MAGIC=true
+BASE_DOMAIN=localhost
 EOF
 ```
-✅ **Verify:** `pip list` shows Flask installed
 
-**Step 5: Platform Layer**
+### Step 4: Platform layer
 
-Create these files (see detailed sections below):
-- `app/extensions.py` → § Extensions Setup
-- `app/config.py` → § Configuration
-- `app/platform/logger.py` → § Logging
-- `app/platform/i18n.py` → [patterns/i18n.md](patterns/i18n.md)
-- `app/platform/errors.py` → § Error Handling
+| File | Source |
+|------|--------|
+| `app/config.py` | [§ Configuration](#configuration) |
+| `app/extensions.py` | [§ Extensions](#extensions) |
+| `app/models/types.py` | [core/portability.md](patterns/core/portability.md#portable-column-types) |
+| `app/models/base.py` | [core/database.md](patterns/core/database.md#base-model) |
+| `app/platform/logger.py` | [§ Logging](#logging) |
+| `app/platform/errors.py` | [§ Error Handling](#error-handling) |
+| `app/platform/i18n.py` | [core/i18n.md](patterns/core/i18n.md) |
+| `app/platform/tenant.py` | [tenancy.md](patterns/tenancy.md) — only if `tenancy: shared` |
 
-✅ **Verify:** Files exist, no import errors
+### Step 5: First model, controller, view
 
-**Step 6: First Model + Controller**
-- Create `app/models/base.py` → § Models Pattern (use B2C or B2B based on config)
-- Create `app/models/user.py` → § Models Pattern
-- Create `app/controllers/main.py` → § Controllers Pattern
-- Create `app/__init__.py` → § Application Factory (includes auto-migrations)
-- Create `app/views/layouts/base.html` → § Views Pattern
+- `app/models/user.py` → [core/mvc.md](patterns/core/mvc.md#models-fat-models)
+- `app/controllers/main.py` → [core/mvc.md](patterns/core/mvc.md#controllers-thin-controllers)
+- `app/views/layouts/base.html` → [core/mvc.md](patterns/core/mvc.md#views-templates)
+- `app/__init__.py` → [§ Application Factory](#application-factory)
 
-✅ **Verify:** `python -c "from app import create_app; create_app()"` succeeds
+### Step 6: Run
 
-**Step 7: Run**
 ```bash
-# Create run.py
-cat > run.py <<EOF
-from dotenv import load_dotenv
-load_dotenv('config/local.env')
-from app import create_app
-app = create_app()
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8000, debug=True)
-EOF
-
-make run
-```
-✅ **Verify:** Server runs at http://localhost:8000
-
----
-
-## 📋 PROJECT CONFIGURATION
-
-> **AI Agents:** Update this section after asking the user configuration questions.
-
-```yaml
-# Project Configuration (fill in after asking user)
-app_type: B2C  # or B2B
-audit_logging: false  # or true
+make run       # runs `flask db upgrade`, then the dev server on :8000
 ```
 
-### What This Means
-
-**If B2C:**
-- Use `user_id` foreign keys on data models
-- No Organization model needed
-- See [patterns/database.md#b2c-user-owned-data](patterns/database.md#b2c-user-owned-data)
-
-**If B2B:**
-- Create Organization model
-- Use `org_id` foreign keys on data models
-- Users have `org_id` and `role` fields
-- See [patterns/database.md#b2b-organization-based](patterns/database.md#b2b-organization-based)
-
-**If audit_logging: true:**
-- Add `created_by` and `updated_by` to BaseModel
-- Track user who made changes
-
----
-
-## 📋 TABLE OF CONTENTS
-
-### Foundation (Read Once)
-- [Philosophy](#philosophy) - Core principles
-- [Folder Structure](#folder-structure) - MVC layout
-- [Tech Stack](#tech-stack) - Dependencies & rationale
-- [Conventions](#conventions) - Code style
-
-### Platform Components (Implement in Order)
-1. [Extensions Setup](#extensions-setup) - SQLAlchemy, Login Manager
-2. [Configuration](#configuration) - Environment variables
-3. [Logging](#logging) - Structured logging
-4. [Application Factory](#application-factory) - Flask app setup with auto-migrations
-5. [Internationalization](#internationalization) → [patterns/i18n.md](patterns/i18n.md)
-6. [Sessions & Auth](#sessions--auth) → [patterns/auth.md](patterns/auth.md)
-7. [Error Handling](#error-handling) - Custom exceptions
-
-### MVC Pattern
-- [Models](#models) - Fat models (business logic + DB)
-- [Views](#views) - Jinja2 templates with HTMX
-- [Controllers](#controllers) - Thin Flask blueprints
-
-### Features (Cross-referenced)
-- [HTMX Patterns](#htmx-patterns) → [patterns/htmx.md](patterns/htmx.md)
-- [Frontend Architecture](#frontend-architecture) → [patterns/frontend.md](patterns/frontend.md)
-- [Multi-Tenancy](#multi-tenancy) → [patterns/database.md](patterns/database.md#multi-tenancy)
-- [Security](#security) → [patterns/security.md](patterns/security.md)
-
-### Operations
-- [Testing](#testing) → [patterns/testing.md](patterns/testing.md)
-- [Deployment](#deployment) → [patterns/deployment.md](patterns/deployment.md)
-
-### Pattern Guides
-- [MVC Pattern Guide](patterns/mvc.md) - Models, Views, Controllers in detail
-- [Database Patterns](patterns/database.md) - SQLAlchemy, auto-migrations, multi-tenancy
-- [i18n Guide](patterns/i18n.md) - Complete internationalization
-- [Auth & Sessions](patterns/auth.md) - Magic links, OAuth, sessions
-- [HTMX Cookbook](patterns/htmx.md) - Interactive patterns
-- [Frontend Guide](patterns/frontend.md) - Bootstrap + HTMX
-- [Testing Guide](patterns/testing.md) - pytest patterns
-- [Security Guide](patterns/security.md) - CSRF, rate limiting, security checklist
-- [Deployment Guide](patterns/deployment.md) - systemd + Caddy on Digital Ocean
+✅ **Verify:** `curl localhost:8000/health` returns `{"status": "ok"}`
 
 ---
 
 ## Philosophy
 
-### Core Principles
-
 - **Keep it simple, explicit, and local.** No magic, no over-engineering.
-- **MVC Pattern**: Models (fat), Views (templates), Controllers (thin).
-- **Server-rendered HTML + HTMX**: No SPA complexity, progressive enhancement.
-- **i18n from day 1**: Global-ready from the start.
-- **Security and observability by default**: CSRF, rate limiting, logging.
-- **Zero yak-shaving dev loop**: `make run` boots a working app.
-- **SQLite by default**: No database server needed. Switch to PostgreSQL when you need it.
-- **Auto-migrations**: Migrations run automatically at startup.
+- **MVC**: fat models, thin controllers, dumb templates.
+- **Server-rendered HTML + HTMX.** No SPA, no build pipeline.
+- **Safe by default.** Tenant isolation is enforced in one place, not in every
+  query. Security that depends on remembering is not security.
+- **i18n from day 1.**
+- **SQLite by default, PostgreSQL when you need it** — one variable, no rewrite.
+- **Zero yak-shaving dev loop.** `make run` boots a working app.
 
-### Fat Models, Thin Controllers
+### Fat models, thin controllers
 
-**Models** contain:
-- Business logic (validation, calculations)
-- Database access (CRUD, queries)
-- Domain rules
-
-**Controllers** contain:
-- Parse input
-- Call model methods
-- Render view or return JSON
-
-**Views** contain:
-- Jinja2 templates
-- Minimal logic (loops, conditions)
-- HTMX attributes for interactivity
+**Models**: business logic, validation, queries, domain rules.
+**Controllers**: parse input → call model → render or return JSON.
+**Views**: Jinja2, minimal logic, HTMX attributes.
 
 ---
 
@@ -262,71 +175,28 @@ audit_logging: false  # or true
 ```
 yourapp/
 ├── app/
-│   ├── __init__.py              # Application factory (with auto-migrations)
-│   ├── config.py                # Configuration management
-│   ├── extensions.py            # SQLAlchemy, LoginManager init
-│   ├── models/                  # Domain models (fat models)
-│   │   ├── __init__.py
-│   │   ├── base.py              # BaseModel with timestamps
-│   │   ├── user.py              # User model (CRUD + business logic)
-│   │   └── setting.py           # Setting model (key-value config)
-│   ├── controllers/             # Flask blueprints (thin)
-│   │   ├── __init__.py
-│   │   ├── main.py              # Home, about pages, health check
-│   │   ├── auth.py              # Login, logout, magic links
-│   │   ├── users.py             # Profile management
-│   │   └── settings.py          # User settings
-│   ├── views/                   # Jinja2 templates
-│   │   ├── layouts/
-│   │   │   ├── base.html        # Main layout (navbar, footer)
-│   │   │   └── minimal.html     # Auth pages (no navbar)
-│   │   ├── partials/
-│   │   │   ├── _navbar.html     # Shared navbar
-│   │   │   └── _toast.html      # Toast notifications
-│   │   ├── main/
-│   │   ├── auth/
-│   │   ├── users/
-│   │   ├── settings/
-│   │   └── errors/
-│   ├── static/                  # Static assets
-│   │   ├── css/
-│   │   │   ├── bootstrap.min.css
-│   │   │   └── app.css          # Brand overrides (~50-100 lines)
-│   │   ├── js/
-│   │   │   ├── htmx.min.js
-│   │   │   └── bootstrap.bundle.min.js
-│   │   └── img/
-│   ├── lang/                    # i18n translation files
-│   │   ├── en.json
-│   │   └── es.json
-│   ├── middleware/              # Request hooks
-│   │   ├── __init__.py
-│   │   ├── auth.py
-│   │   ├── csrf.py
-│   │   └── ratelimit.py
-│   └── platform/                # Infrastructure layer
-│       ├── __init__.py
-│       ├── logger.py            # Structured logging (structlog)
-│       ├── i18n.py              # Internationalization
-│       └── errors.py            # Custom exceptions
-├── migrations/                  # Alembic migrations
-│   └── versions/
-├── tests/                       # pytest tests
-│   ├── conftest.py              # Fixtures
-│   ├── test_models/
-│   └── test_controllers/
-├── scripts/
-│   └── deploy.sh                # Production deployment script
-├── config/
-│   └── local.env.example
-├── patterns/                    # Documentation
-├── run.py                       # Development entry point
-├── wsgi.py                      # Production entry point (Gunicorn)
-├── requirements.in              # Package names (no versions)
-├── requirements.txt             # Compiled with pinned versions
-├── Makefile
-├── README.md
-└── CLAUDE.md                    # This file
+│   ├── __init__.py           # application factory
+│   ├── config.py
+│   ├── extensions.py         # db, login_manager, migrate, SQLite pragmas
+│   ├── models/
+│   │   ├── base.py           # BaseModel, OrgScoped, utcnow
+│   │   ├── types.py          # portable column types
+│   │   ├── user.py
+│   │   └── organization.py   # tenancy: shared only
+│   ├── controllers/          # thin Flask blueprints
+│   ├── views/                # Jinja2 (templates/ is called views/ here)
+│   │   ├── layouts/  partials/  errors/
+│   │   └── themes/           # theming: true only
+│   ├── static/               # css, js, img — vendored, no CDN
+│   ├── lang/                 # en.json, es.json
+│   ├── middleware/           # auth, csrf, ratelimit
+│   └── platform/             # logger, i18n, errors, tenant, plugins, theming
+├── plugins/                  # plugins: true only
+├── migrations/versions/
+├── tests/
+├── scripts/deploy.sh
+├── config/local.env
+├── run.py  wsgi.py  Makefile  requirements.in
 ```
 
 ---
@@ -335,61 +205,76 @@ yourapp/
 
 | Layer | Technology | Rationale |
 |-------|-----------|-----------|
-| **Backend** | Python 3.11+ | Type hints, performance, ecosystem |
-| **Web Framework** | Flask 3.x | Simple, mature, Jinja2 built-in |
-| **Database** | SQLite (default) | No setup; PostgreSQL when needed |
-| **ORM** | SQLAlchemy 2.0 | Declarative models, Postgres-compatible |
-| **Migrations** | Alembic (Flask-Migrate) | Auto-run at startup |
-| **Templates** | Jinja2 | Auto-escaping, fast, Flask-native |
-| **Frontend** | Bootstrap 5 + HTMX | No build step, progressive enhancement |
-| **i18n** | JSON catalogs | Simple, runtime-loaded |
-| **Logging** | structlog | Structured JSON logging |
-| **Auth** | Flask-Login + Magic links | Easy to start, extensible |
-| **Testing** | pytest | Transaction rollback pattern |
-| **Server** | Gunicorn + systemd | Production WSGI server |
-| **Reverse Proxy** | Caddy | Automatic HTTPS |
+| Backend | Python 3.11+ / Flask 3.x | Simple, mature, Jinja2 built-in |
+| Database | SQLite → PostgreSQL | No server to start; switchable via `DATABASE_URL` |
+| ORM | SQLAlchemy 2.0 | Declarative, portable across both engines |
+| Migrations | Alembic (Flask-Migrate) | Run once at deploy, never in-process |
+| Frontend | Bootstrap 5 + HTMX | No build step, progressive enhancement |
+| i18n | JSON catalogs | Simple, runtime-loaded |
+| Logging | structlog | Structured JSON in production |
+| Auth | Flask-Login + magic links | Easy to start, extensible |
+| Testing | pytest | SQLite in-memory, PostgreSQL in CI |
+| Serving | Gunicorn + systemd + Caddy | Automatic HTTPS, no containers |
 
 ---
 
-## Conventions
+## Configuration
 
-### Python Code
-- **Type hints** for function signatures
-- **Docstrings** for public methods
-- **Classes for models**, functions for utilities
-- **Files ~300 lines**: Split by concern (`user.py`, `user_validation.py`)
+```python
+# app/config.py
+import os
 
-### HTTP
-- **Controllers**: Parse input, call models, render view/JSON
-- **Use Flask error handlers** for exceptions
-- **Add request ID middleware** for traceability
 
-### Templates
-- **Jinja2** with auto-escaping (no `|safe` unless trusted)
-- **Partials prefix**: `_partial_name.html`
-- **All user-visible strings in i18n catalogs**
+class Config:
+    APP_ENV = os.environ.get('APP_ENV', 'dev')
+    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-change-in-production')
+    DEBUG = APP_ENV == 'dev'
+    BASE_DOMAIN = os.environ.get('BASE_DOMAIN', 'localhost')
 
-### Frontend
-- **Bootstrap 5** for CSS (no Tailwind, no custom frameworks)
-- **HTMX** for interactivity (no custom JavaScript)
-- **One global CSS file** (`static/css/app.css`) for brand overrides only
-- **No build pipeline** (no npm, webpack, vite)
+    DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
+    SQLALCHEMY_DATABASE_URI = DATABASE_URL
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    IS_SQLITE = DATABASE_URL.startswith('sqlite')
+    IS_POSTGRES = DATABASE_URL.startswith('postgresql')
+
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_size': 5, 'max_overflow': 10, 'pool_timeout': 30,
+        'pool_recycle': 300, 'pool_pre_ping': True,
+    } if IS_POSTGRES else {'connect_args': {'timeout': 30}}
+
+    SESSION_COOKIE_SECURE = APP_ENV != 'dev'
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
+
+    CSRF_ENABLED = True
+    RUN_MIGRATIONS_ON_STARTUP = False    # migrations belong in deploy, not boot
+    DEV_MAGIC = os.environ.get('DEV_MAGIC', 'false').lower() == 'true'
+```
 
 ---
 
-## Extensions Setup
+## Extensions
 
 ```python
 # app/extensions.py
-"""Flask extensions initialization."""
-
+import sqlalchemy as sa
+from sqlalchemy import event
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from flask_migrate import Migrate
 
-db = SQLAlchemy()
-migrate = Migrate()
+# Named constraints are required for SQLite migrations. Set this before the
+# first migration or Alembic will want to rename every constraint you have.
+NAMING_CONVENTION = {
+    'ix': 'ix_%(table_name)s_%(column_0_name)s',
+    'uq': 'uq_%(table_name)s_%(column_0_name)s',
+    'ck': 'ck_%(table_name)s_%(constraint_name)s',
+    'fk': 'fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s',
+    'pk': 'pk_%(table_name)s',
+}
 
+db = SQLAlchemy(metadata=sa.MetaData(naming_convention=NAMING_CONVENTION))
+migrate = Migrate()
 login_manager = LoginManager()
 login_manager.login_view = 'auth.login'
 login_manager.login_message_category = 'warning'
@@ -398,146 +283,80 @@ login_manager.login_message_category = 'warning'
 @login_manager.user_loader
 def load_user(user_id):
     from .models.user import User
-    return User.query.get(int(user_id))
-```
-
----
-
-## Configuration
-
-```python
-# app/config.py
-"""Configuration management."""
-
-import os
+    return db.session.get(User, int(user_id))
 
 
-class Config:
-    """Base configuration."""
+def init_sqlite_pragmas(app):
+    """SQLite enforces no foreign keys by default -- every ondelete='CASCADE'
+    silently does nothing without this. No-op on PostgreSQL.
+    See core/portability.md."""
+    if not app.config['IS_SQLITE']:
+        return
 
-    APP_ENV = os.environ.get('APP_ENV', 'dev')
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-change-in-production')
-    DEBUG = APP_ENV == 'dev'
-
-    # Database (SQLite default, PostgreSQL optional)
-    DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
-    SQLALCHEMY_DATABASE_URI = DATABASE_URL
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
-
-    # PostgreSQL connection pooling (only if using Postgres)
-    if DATABASE_URL.startswith('postgresql'):
-        SQLALCHEMY_ENGINE_OPTIONS = {
-            'pool_size': 5,
-            'max_overflow': 10,
-            'pool_timeout': 30,
-            'pool_recycle': 300,
-            'pool_pre_ping': True,
-        }
-
-    # Session
-    SESSION_COOKIE_SECURE = APP_ENV != 'dev'
-    SESSION_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SAMESITE = 'Lax'
-
-    # Auth
-    DEV_MAGIC = os.environ.get('DEV_MAGIC', 'false').lower() == 'true'
-```
-
----
-
-## Logging
-
-```python
-# app/platform/logger.py
-"""Structured logging with structlog."""
-
-import structlog
-import logging
-import sys
-
-
-def init_logger(env: str = 'dev'):
-    """Initialize logger based on environment."""
-    logging.basicConfig(format='%(message)s', stream=sys.stdout, level=logging.INFO)
-
-    if env == 'dev':
-        structlog.configure(
-            processors=[
-                structlog.stdlib.add_log_level,
-                structlog.processors.TimeStamper(fmt='%Y-%m-%d %H:%M:%S'),
-                structlog.dev.ConsoleRenderer(colors=True),
-            ],
-            wrapper_class=structlog.stdlib.BoundLogger,
-            logger_factory=structlog.stdlib.LoggerFactory(),
-        )
-    else:
-        structlog.configure(
-            processors=[
-                structlog.stdlib.add_log_level,
-                structlog.processors.TimeStamper(fmt='iso'),
-                structlog.processors.JSONRenderer(),
-            ],
-            wrapper_class=structlog.stdlib.BoundLogger,
-            logger_factory=structlog.stdlib.LoggerFactory(),
-        )
-
-
-def get_logger():
-    """Get configured logger."""
-    return structlog.get_logger()
+    @event.listens_for(db.engine, 'connect')
+    def _pragmas(dbapi_conn, _record):
+        cur = dbapi_conn.cursor()
+        cur.execute('PRAGMA foreign_keys=ON')
+        cur.execute('PRAGMA journal_mode=WAL')
+        cur.execute('PRAGMA synchronous=NORMAL')
+        cur.execute('PRAGMA busy_timeout=5000')
+        cur.close()
 ```
 
 ---
 
 ## Application Factory
 
-**Note:** Migrations run automatically at startup.
-
 ```python
 # app/__init__.py
-"""Flask application factory with auto-migrations."""
-
 from flask import Flask
-from flask_migrate import upgrade
 from .config import Config
-from .extensions import db, migrate, login_manager
+from .extensions import db, migrate, login_manager, init_sqlite_pragmas
 from .platform.logger import init_logger, get_logger
 
 
 def create_app(config_class=Config):
-    """Create and configure the Flask application."""
     app = Flask(__name__, template_folder='views', static_folder='static')
     app.config.from_object(config_class)
 
-    # Initialize logging
     init_logger(app.config['APP_ENV'])
     log = get_logger()
 
-    # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
     login_manager.init_app(app)
 
-    # Auto-run migrations on startup
     with app.app_context():
-        upgrade()
-        log.info('migrations_applied')
+        init_sqlite_pragmas(app)
 
-    # Register blueprints
+    # Migrations are NOT run here. N Gunicorn workers would race the same
+    # upgrade on boot. See core/database.md § Migrations.
+    if app.config.get('RUN_MIGRATIONS_ON_STARTUP'):
+        from flask_migrate import upgrade
+        with app.app_context():
+            upgrade()
+
+    from .middleware.csrf import init_csrf
+    init_csrf(app)
+
+    # tenancy: shared only -- resolves g.org and installs the tenant filter
+    from .platform.tenant import init_tenant
+    init_tenant(app)
+
     from .controllers import main, auth, users, settings
-    app.register_blueprint(main.bp)
-    app.register_blueprint(auth.bp)
-    app.register_blueprint(users.bp)
-    app.register_blueprint(settings.bp)
+    for module in (main, auth, users, settings):
+        app.register_blueprint(module.bp)
 
-    # Register error handlers
+    # plugins: true only -- boot-time registration, per-request tenant gating
+    from .platform.plugins import load_plugins
+    load_plugins(app)
+
     register_error_handlers(app)
-
+    log.info('app_started', env=app.config['APP_ENV'])
     return app
 
 
 def register_error_handlers(app):
-    """Register error handlers."""
     from flask import render_template
 
     @app.errorhandler(404)
@@ -550,17 +369,45 @@ def register_error_handlers(app):
         return render_template('errors/500.html'), 500
 ```
 
+Order matters: `init_tenant` before blueprints so `g.org` exists in every
+`before_request`; `load_plugins` last so plugin routes register after core ones.
+
+---
+
+## Logging
+
+```python
+# app/platform/logger.py
+import logging, sys
+import structlog
+
+
+def init_logger(env: str = 'dev'):
+    logging.basicConfig(format='%(message)s', stream=sys.stdout, level=logging.INFO)
+    renderer = (structlog.dev.ConsoleRenderer(colors=True) if env == 'dev'
+                else structlog.processors.JSONRenderer())
+    structlog.configure(
+        processors=[
+            structlog.stdlib.add_log_level,
+            structlog.processors.TimeStamper(fmt='%Y-%m-%d %H:%M:%S' if env == 'dev' else 'iso'),
+            renderer,
+        ],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+    )
+
+
+def get_logger():
+    return structlog.get_logger()
+```
+
 ---
 
 ## Error Handling
 
 ```python
 # app/platform/errors.py
-"""Custom error classes."""
-
-
 class AppError(Exception):
-    """Base application error."""
     code = 'E_UNKNOWN'
     http_status = 500
 
@@ -570,211 +417,77 @@ class AppError(Exception):
 
 
 class ValidationError(AppError):
-    """Validation error (400)."""
-    code = 'E_INVALID_INPUT'
-    http_status = 400
+    code, http_status = 'E_INVALID_INPUT', 400
 
 
 class NotFoundError(AppError):
-    """Not found error (404)."""
-    code = 'E_NOT_FOUND'
-    http_status = 404
+    code, http_status = 'E_NOT_FOUND', 404
 
 
 class UnauthorizedError(AppError):
-    """Unauthorized error (401)."""
-    code = 'E_UNAUTHORIZED'
-    http_status = 401
+    code, http_status = 'E_UNAUTHORIZED', 401
+
+
+class ForbiddenError(AppError):
+    code, http_status = 'E_FORBIDDEN', 403
 ```
 
 ---
 
-## Models
+## 📚 Pattern Index
 
-→ **See complete guide:** [patterns/mvc.md](patterns/mvc.md#models-fat-models)
+### Core — read all of these
 
-→ **For multi-tenancy (B2C vs B2B):** [patterns/database.md](patterns/database.md#multi-tenancy)
+| Doc | Covers |
+|-----|--------|
+| [core/mvc.md](patterns/core/mvc.md) | Models, views, controllers in detail |
+| [core/database.md](patterns/core/database.md) | SQLAlchemy conventions, migrations, queries |
+| [core/portability.md](patterns/core/portability.md) | **SQLite ↔ PostgreSQL: types, pragmas, migration** |
+| [core/auth.md](patterns/core/auth.md) | Magic links, OAuth, sessions |
+| [core/security.md](patterns/core/security.md) | CSRF, rate limiting, checklist |
+| [core/i18n.md](patterns/core/i18n.md) | Internationalization |
+| [core/htmx.md](patterns/core/htmx.md) | Interactive patterns |
+| [core/frontend.md](patterns/core/frontend.md) | Bootstrap 5 + HTMX |
+| [core/mobile-navigation.md](patterns/core/mobile-navigation.md) | Responsive navigation |
+| [core/testing.md](patterns/core/testing.md) | pytest, fixtures, isolation tests |
+| [core/typing.md](patterns/core/typing.md) | Type hints and mypy |
+| [core/audit.md](patterns/core/audit.md) | `created_by` / `updated_by` |
+| [core/deployment.md](patterns/core/deployment.md) | systemd + Gunicorn + Caddy |
 
----
+### Layers — read only when the condition holds
 
-## Controllers
-
-→ **See complete guide:** [patterns/mvc.md](patterns/mvc.md#controllers-thin-controllers)
-
----
-
-## Views
-
-→ **See complete guide:** [patterns/mvc.md](patterns/mvc.md#views-templates)
-
----
-
-## HTMX Patterns
-
-→ **See complete guide:** [patterns/htmx.md](patterns/htmx.md)
-
----
-
-## Frontend Architecture
-
-**Bootstrap 5 + HTMX. No build pipeline.**
-
-### Principles
-
-- ✅ Reuse Bootstrap classes (never invent custom classes)
-- ✅ One `app.css` for brand overrides (~50-100 lines max)
-- ✅ No npm, webpack, or build tools
-- ✅ HTMX for all interactivity
-- ✅ Progressive enhancement (works without JS)
-
-→ **For complete guide:** See [patterns/frontend.md](patterns/frontend.md)
-
----
-
-## Multi-Tenancy
-
-Based on your Project Configuration:
-
-### B2C: User-Owned Data
-
-```python
-class Setting(BaseModel):
-    __tablename__ = 'setting'
-
-    user_id = db.Column(db.BigInteger, db.ForeignKey('user.id'), nullable=False, index=True)
-    key = db.Column(db.String(100), nullable=False)
-    value = db.Column(db.Text, nullable=False)
-
-    __table_args__ = (db.UniqueConstraint('user_id', 'key'),)
-```
-
-### B2B: Organization-Based
-
-```python
-class OrgScopedModel(BaseModel):
-    """Base for organization-scoped models."""
-    __abstract__ = True
-
-    org_id = db.Column(db.BigInteger, db.ForeignKey('organization.id'), nullable=False, index=True)
-```
-
-→ **For complete patterns:** See [patterns/database.md](patterns/database.md#multi-tenancy)
-
----
-
-## Security
-
-→ **See complete guide:** [patterns/security.md](patterns/security.md)
-
----
-
-## Testing
-
-**Fast, isolated tests using transaction rollback.**
-
-```python
-# tests/conftest.py
-import pytest
-from app import create_app
-from app.extensions import db
-
-
-@pytest.fixture
-def app():
-    app = create_app()
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
-    app.config['TESTING'] = True
-
-    with app.app_context():
-        db.create_all()
-        yield app
-        db.drop_all()
-
-
-@pytest.fixture
-def client(app):
-    return app.test_client()
-```
-
-→ **For complete testing guide:** See [patterns/testing.md](patterns/testing.md)
-
----
-
-## Deployment
-
-**Stack:** Digital Ocean Droplet + systemd + Gunicorn + Caddy
-
-### Quick Deploy
-
-```bash
-make deploy
-```
-
-This runs `scripts/deploy.sh` which:
-1. Checks for uncommitted changes
-2. Pushes to origin
-3. Pulls on server
-4. Installs dependencies
-5. Restarts systemd service
-6. Verifies health check
-
-→ **For complete deployment guide:** See [patterns/deployment.md](patterns/deployment.md)
-
----
-
-## Makefile
-
-```makefile
-.PHONY: venv install compile run test clean deploy
-
-venv:        # Create virtual environment
-install:     # Install dependencies
-compile:     # Compile requirements.in -> requirements.txt
-run:         # Run development server
-test:        # Run tests
-clean:       # Remove venv and cached files
-deploy:      # Deploy to production
-```
+| Doc | Condition | Covers |
+|-----|-----------|--------|
+| [tenancy.md](patterns/tenancy.md) | `tenancy: shared` | Organizations, resolution, automatic scoping, roles |
+| [plugins.md](patterns/plugins.md) | `plugins: true` | Per-tenant installable features and routes |
+| [theming.md](patterns/theming.md) | `theming: true` | Per-tenant branding and template overrides |
 
 ---
 
 ## 🤖 AI Agent Instructions
 
-### For Claude/AI Assistants
+**Bootstrapping a new project:**
+1. Ask the [configuration questions](#the-questions-to-ask). Do not guess.
+2. Record answers in [Project Configuration](#project-configuration).
+3. Read all of `patterns/core/`. Read layer docs **only** where the condition holds.
+4. Execute Quick Start steps 1–6 in order.
+5. Verify `make run` serves `/health`.
 
-**When bootstrapping new project:**
-1. **Ask configuration questions first** (B2C/B2B, audit logging)
-2. Record answers in Project Configuration section
-3. Execute Quick Start steps 1-7 in order
-4. Use appropriate model patterns based on configuration
-5. Verify: `make run` succeeds
+**Adding a feature:** find the relevant pattern doc via the index above and
+follow it. Do not invent a second way to do something the blueprint already
+covers.
 
-**When adding features:**
-1. Scan Table of Contents for relevant section
-2. Jump to section via anchor link
-3. If section says "See patterns/X.md", read that file
-
-**When troubleshooting:**
-1. Check relevant platform component section
-2. Review patterns/ for edge cases
-
-### Files to Read (in order)
-1. `CLAUDE.md` - master blueprint (this file)
-2. `patterns/*.md` - Only when referenced
-
-**Never skip:**
-- Philosophy (defines patterns)
-- Project Configuration (determines model patterns)
-- Quick Start (ensures nothing missed)
-- MVC Pattern sections (core architecture)
+**Non-negotiables:**
+- `BigIntPK` for primary keys — a plain `BigInteger` PK breaks every INSERT on SQLite.
+- `utcnow()` — never `datetime.utcnow()`.
+- Named constraints — set the naming convention before the first migration.
+- SQLite pragmas — without them `ondelete` is silently ignored.
+- Migrations at deploy, never inside `create_app`.
+- With `tenancy: shared`, business models inherit `OrgScoped` and queries are
+  never manually filtered by `org_id`.
 
 ---
 
 ## License
 
-Copyright (c) Your Organization.
-
----
-
-**That's it.** One file to guide any Flask SaaS project with MVC, i18n, and production-ready patterns.
-**Build fast, read easily, scale calmly.**
+MIT — see [LICENSE](LICENSE).

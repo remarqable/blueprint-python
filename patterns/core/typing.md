@@ -1,6 +1,6 @@
 # Type Safety with mypy --strict
 
-> **Complete guide to writing type-safe Python code in Blueprint modules.**
+> **Complete guide to writing type-safe Python code in Blueprint applications.**
 > All code must pass `mypy --strict` for consistency and maintainability.
 
 ---
@@ -9,13 +9,13 @@
 
 ```bash
 # Install type checking dependencies
-pip install mypy sqlalchemy[mypy] types-Flask
+pip install mypy types-Flask
 
 # Run type checker on your module
-mypy modules/yourmodule/
+mypy app/
 
 # Run on entire codebase
-mypy modules/
+mypy app/
 ```
 
 ---
@@ -41,11 +41,13 @@ Blueprint uses `pyproject.toml` for mypy configuration:
 ```toml
 [tool.mypy]
 python_version = "3.11"
-strict = true
-plugins = ["sqlalchemy.ext.mypy.plugin"]
+warn_return_any = true
+disallow_untyped_defs = true
+# No sqlalchemy.ext.mypy.plugin: it is deprecated as of SQLAlchemy 2.0, which
+# types models natively through Mapped[] annotations.
 
 [[tool.mypy.overrides]]
-module = ["flask_login.*", "pluggy.*", "flask_sqlalchemy.*"]
+module = ["flask_login.*", "flask_sqlalchemy.*", "flask_migrate.*"]
 ignore_missing_imports = true
 ```
 
@@ -484,7 +486,7 @@ Before committing, verify:
 - [ ] `__manifest__.py` uses `ModuleManifest` TypedDict
 - [ ] `__init__.py` has typed `module_instance`
 - [ ] Routes return `ResponseReturnValue`
-- [ ] `mypy modules/yourmodule/` passes with no errors
+- [ ] `mypy app/` passes with no errors
 
 ---
 

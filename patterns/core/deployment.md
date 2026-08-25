@@ -221,6 +221,9 @@ Group=www-data
 WorkingDirectory=/opt/yourapp
 Environment="PATH=/opt/yourapp/venv/bin"
 EnvironmentFile=/opt/yourapp/.env
+# Migrations run once here, NOT inside create_app: N workers would race
+# the same Alembic upgrade on boot. Must exit 0 or the unit fails.
+ExecStartPre=/opt/yourapp/venv/bin/flask db upgrade
 ExecStart=/opt/yourapp/venv/bin/gunicorn wsgi:app -w 4 -b 127.0.0.1:8000
 Restart=always
 RestartSec=5
@@ -423,7 +426,7 @@ def api_health():
 
     try:
         # Verify database connection
-        db.session.execute('SELECT 1')
+        db.session.execute(sa.text('SELECT 1'))   # raw strings raise in SQLAlchemy 2.0
         db_status = 'connected'
     except Exception as e:
         db_status = f'error: {str(e)}'

@@ -1,4 +1,4 @@
-.PHONY: help venv install compile run test clean deploy provision
+.PHONY: help venv install compile migrate run test test-postgres clean deploy provision
 
 help:
 	@echo "Usage: make [target]"
@@ -7,8 +7,10 @@ help:
 	@echo "  venv       Create virtual environment and install dependencies"
 	@echo "  install    Install/update dependencies"
 	@echo "  compile    Compile requirements.in to requirements.txt"
-	@echo "  run        Run the application"
-	@echo "  test       Run tests"
+	@echo "  migrate    Apply database migrations"
+	@echo "  run        Apply migrations, then run the application"
+	@echo "  test       Run tests (SQLite in-memory)"
+	@echo "  test-postgres  Run tests against PostgreSQL"
 	@echo "  clean      Remove venv and cache files"
 	@echo "  deploy     Deploy the application"
 	@echo "  provision  Show server provisioning instructions"
@@ -26,11 +28,18 @@ compile:
 	./venv/bin/pip install pip-tools
 	./venv/bin/pip-compile requirements.in -o requirements.txt
 
-run:
+migrate:
+	./venv/bin/flask db upgrade
+
+run: migrate
 	./venv/bin/python run.py
 
 test:
 	./venv/bin/pytest tests/ -v
+
+test-postgres:
+	TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/test \
+		./venv/bin/pytest tests/ -v
 
 clean:
 	rm -rf venv *.db
