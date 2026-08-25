@@ -336,63 +336,29 @@ def add_security_headers(response):
     return response
 ```
 
-### CSP and Alpine.js
+### Why `unsafe-eval` is in there
 
-`'unsafe-eval'` above is not decoration and not an oversight — **Alpine requires
-it.** Alpine 3 compiles inline expressions (`x-on:click="open = !open"`,
-`x-show="open"`) with `new Function()`, so under a strict `script-src 'self'`
-every Alpine directive silently stops working. Nothing throws a visible error;
-your dropdowns and modals simply do nothing.
+Alpine runs the little expressions you write in HTML attributes
+(`@click="open = !open"`), which means turning text into code at runtime. That is
+what `'unsafe-eval'` permits. Leave it in — without it every dropdown, modal, and
+toggle stops working, silently and with no console error.
 
-You have two honest options:
+It is a worse name than it deserves. It only matters if an attacker has *already*
+got a script onto your page; it does not make that any more likely. The two
+things that actually prevent injection — Jinja escaping every rendered variable,
+and `script-src 'self'` blocking outside scripts — are both still in force.
 
-**1. Allow `'unsafe-eval'`** (shown above). Simple, and the practical choice for
-most apps. Understand what it costs: it removes CSP's protection against an
-attacker who has already achieved script injection turning a string into
-executable code. It does **not** weaken your defence against the injection
-itself — that is `script-src 'self'` plus Jinja's autoescaping, both still in
-force.
+`style-src 'unsafe-inline'` is needed for the same practical reason: Alpine's
+`x-show` sets inline styles, and per-tenant branding injects a `<style>` block
+([theming.md](../theming.md#branding-without-templates)).
 
-**2. Use the Alpine CSP build**, which needs no `eval` because expressions are
-pre-registered rather than parsed at runtime:
+Keep `object-src 'none'`, `base-uri 'self'`, and `frame-ancestors 'none'` — they
+cost nothing and close real attacks.
 
-```html
-<script defer src="/static/js/alpine-csp.min.js"></script>
-```
-
-```javascript
-// app/static/js/components.js — loaded before Alpine
-document.addEventListener('alpine:init', () => {
-  Alpine.data('dropdown', () => ({
-    open: false,
-    toggle() { this.open = !this.open },
-    close()  { this.open = false },
-  }));
-});
-```
-
-```html
-<!-- Only method and property NAMES in attributes. No expressions. -->
-<div x-data="dropdown">
-  <button x-on:click="toggle" x-bind:aria-expanded="open">Menu</button>
-  <div x-show="open" x-on:click.outside="close" x-cloak>…</div>
-</div>
-```
-
-The cost is real: every component must be registered in JavaScript, and the
-inline-expression style used throughout
-[frontend.md](frontend.md#component-patterns) has to be rewritten. Pick this if
-you handle payment data, health records, or anything else where you will be
-asked to justify `'unsafe-eval'` in an audit. Pick it **before** you write the
-components, not after.
-
-Whichever you choose, keep `object-src 'none'`, `base-uri 'self'`, and
-`frame-ancestors 'none'` — they are free and they close real attacks.
-
-> `style-src 'unsafe-inline'` is separately required by the per-tenant brand
-> block in [theming.md](../theming.md#branding-without-templates). If you drop
-> per-tenant branding you can drop it too, but Alpine's `x-show` also sets inline
-> styles.
+> Handling raw card numbers or health records, or answering a security
+> questionnaire that names `unsafe-eval`? There is a stricter Alpine build that
+> avoids it, at the cost of rewriting every component in JavaScript. Switch
+> before writing components, not after.
 
 ---
 

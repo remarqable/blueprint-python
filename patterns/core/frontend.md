@@ -222,13 +222,9 @@ modals, dismissible alerts. About 15KB, no build step, declarative in the markup
 `defer` is required — Alpine initializes on `DOMContentLoaded` and will miss the
 DOM without it.
 
-> **Check your CSP before writing components.** Alpine compiles inline
-> expressions with `new Function()`, so a strict `script-src 'self'` disables
-> every directive on this page with no visible error. Either allow
-> `'unsafe-eval'` or adopt the Alpine CSP build, which requires a different
-> component style — decide up front, because converting later means rewriting
-> every component. See
-> [security.md § CSP and Alpine.js](security.md#csp-and-alpinejs).
+> Your Content-Security-Policy must include `'unsafe-eval'`, or Alpine's
+> directives silently do nothing. The policy in
+> [security.md](security.md#why-unsafe-eval-is-in-there) already has it.
 
 Add the `x-cloak` rule or every `x-show` element flashes visible on first paint:
 
