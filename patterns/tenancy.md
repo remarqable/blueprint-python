@@ -138,24 +138,28 @@ def init_tenant(app):
         if request.path.startswith(('/static/', '/health')):
             return
 
-        org = _from_subdomain() or _from_session()
+        org = _from_subdomain() or _default_org() or _from_session()
         if org is None:
-            return                      # public pages: login, marketing, signup
+            return                      # installation pages: login, signup, launcher
 
         if not org.is_active:
             abort(410, 'This workspace has been deactivated')
 
-        if not current_user.is_authenticated:
-            return
-
-        membership = Membership.query.filter_by(
-            user_id=current_user.id, org_id=org.id
-        ).first()
-        if membership is None:
-            abort(404)                  # not a member: the tenant does not exist for you
-
+        # Set g.org BEFORE any auth/membership decision. The tenant filter
+        # keys off g.org; leaving it None for a resolved host would serve
+        # anonymous visitors UNSCOPED queries. See § Public Content below.
         g.org = org
-        g.membership = membership
+
+        if current_user.is_authenticated:
+            g.membership = Membership.query.filter_by(
+                user_id=current_user.id, org_id=org.id
+            ).first()
+
+        # Private workspaces (the B2B default): the tenant does not exist
+        # for outsiders. Public-content apps skip this and gate at the
+        # content layer instead.
+        if not app.config.get('PUBLIC_TENANTS') and g.membership is None:
+            abort(404)                  # not 403: 403 confirms the workspace exists
 
 
 def _from_subdomain():
@@ -167,16 +171,61 @@ def _from_subdomain():
     if slug in Organization.RESERVED_SLUGS:
         return None
     return Organization.query.filter_by(slug=slug).first()
+
+
+def _default_org():
+    """Default-org mode: the bare domain answers for a sole organization.
+
+    A single-org installation (most self-hosted installs) should not force
+    its users through a subdomain. When the host IS the base domain and
+    exactly one active organization exists, resolve to it. The moment a
+    second organization appears, the bare domain reverts to installation
+    pages (login, launcher) and subdomains take over.
+    """
+    host = request.host.split(':')[0]
+    if host != current_app.config['BASE_DOMAIN']:
+        return None
+    orgs = Organization.query.filter_by(is_active=True).limit(2).all()
+    return orgs[0] if len(orgs) == 1 else None
 ```
 
-**Return 404, not 403,** when a user is not a member. A 403 confirms the
-workspace exists, which leaks your customer list to anyone who can guess slugs.
+**Return 404, not 403,** when a user is not a member of a private workspace. A
+403 confirms the workspace exists, which leaks your customer list to anyone who
+can guess slugs.
+
+### Public content and anonymous visitors
+
+The classic version of this hook set `g.org` only after a successful
+membership check — correct for a members-only B2B app, where every real route
+sits behind `@login_required` anyway. It is **wrong for any app that serves
+public content** (a published site, a blog, a community with public reads):
+an anonymous request to `acme.example.com` would run with `g.org = None`,
+the loader-criteria filter would decline to apply, and every `OrgScoped`
+query on the page would read across **all tenants**.
+
+The rules that keep public content safe:
+
+- `g.org` is set whenever the host resolves to an organization — before and
+  independent of authentication. Anonymous reads are scoped reads.
+- `PUBLIC_TENANTS` (config) chooses what a resolved host means for outsiders:
+  `False` (default) 404s non-members as above; `True` lets the request
+  proceed with `g.membership = None`.
+- With `PUBLIC_TENANTS = True`, *content* visibility (public vs member-only)
+  is a model-layer concern — a `visibility` column checked in queries and
+  enforced with `can()` — never an excuse to weaken the tenant filter.
+- Writes are unaffected: the `before_flush` stamp still requires a resolved
+  `g.org`, and write routes still require authentication and membership.
+
+The isolation test for this is as important as the two at the bottom of this
+document: request a public page of tenant A as an anonymous visitor and assert
+tenant B's rows are absent.
 
 ### Choosing a resolution strategy
 
 | Strategy | URL | Use when |
 |----------|-----|----------|
 | Subdomain | `acme.example.com/projects` | Default. Branded, cookie-isolatable, cache-friendly. |
+| Default org | `example.com/projects` | Bare domain, exactly one org. Composes with subdomains: single-org installs get clean URLs, multi-org installs get the launcher. |
 | Path prefix | `example.com/acme/projects` | No wildcard DNS/TLS available. Every `url_for` needs the slug. |
 | Session only | `example.com/projects` | Users rarely belong to more than one org. Simplest; breaks multi-tab. |
 

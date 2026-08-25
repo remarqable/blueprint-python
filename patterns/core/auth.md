@@ -1,6 +1,6 @@
 # Authentication & Sessions
 
-> Magic links, session management, and security
+> Magic links, email + password, session management, and security
 
 ---
 
@@ -8,6 +8,7 @@
 
 - [Overview](#overview)
 - [Magic Links (Passwordless)](#magic-links-passwordless)
+- [Email + Password](#email--password)
 - [Session Management](#session-management)
 - [Flask-Login Integration](#flask-login-integration)
 - [Auth Controller](#auth-controller)
@@ -19,19 +20,33 @@
 
 ## Overview
 
-Default authentication strategy: **Magic Links** (passwordless)
+Two primary strategies. Record the choice as `auth:` in the project
+configuration and implement **one** — do not blend them at the start (adding
+the other later is straightforward).
 
-Benefits:
+**Magic links** (`auth: magic_links`) — the default:
 - No password storage/hashing
 - Simpler UX for users
 - Easy to implement
-- Works well for SaaS apps
+- **Requires working outbound email.** Every login sends an email. If the
+  application must install, authenticate, or operate without an email
+  service configured, magic links cannot be the primary strategy.
 
-For production, consider adding OAuth providers (Google, GitHub).
+**Email + password** (`auth: password`):
+- Works with zero email infrastructure — no SMTP required to install,
+  log in, or administer
+- The right choice for self-hostable products, installations behind
+  firewalls, and any app whose setup wizard must complete offline
+- Costs you password hashing, a change-password flow, and an
+  email-independent recovery path (a server-side CLI reset — see below)
+
+Either way, OAuth providers (Google, GitHub) can be layered on later.
 
 ---
 
 ## Magic Links (Passwordless)
+
+Use when `auth: magic_links`.
 
 ### How It Works
 
@@ -157,6 +172,141 @@ class MagicLink(BaseModel):
 
 ---
 
+## Email + Password
+
+Use when `auth: password`. Nothing here requires outbound email — including
+account recovery.
+
+### Hashing
+
+Use Werkzeug's built-in helpers (scrypt by default in current Werkzeug) — no
+extra dependency:
+
+```python
+# app/models/user.py
+from werkzeug.security import generate_password_hash, check_password_hash
+
+
+class User(BaseModel, UserMixin):
+    __tablename__ = 'user'
+
+    email = db.Column(db.String(255), unique=True, nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    is_active = db.Column(db.Boolean, default=True)
+
+    def set_password(self, password: str) -> None:
+        if len(password) < 8:
+            raise ValidationError('Password must be at least 8 characters')
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        return check_password_hash(self.password_hash, password)
+```
+
+Never store, log, or flash the plaintext password. There is no
+`password` column — only `password_hash`.
+
+### Login Controller
+
+```python
+# app/controllers/auth.py
+@bp.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('users.profile'))
+
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
+
+        user = User.get_by_email(email)
+
+        # One generic failure message. Distinguishing "no such user" from
+        # "wrong password" is a user-enumeration oracle.
+        if user is None or not user.is_active or not user.check_password(password):
+            log.info('login_failed', email=email)
+            flash(t('auth.invalid_credentials'), 'error')
+            return render_template('auth/login.html'), 401
+
+        session.clear()                  # regenerate: prevents session fixation
+        login_user(user, remember=True)
+        log.info('user_logged_in', user_id=user.id)
+        return redirect(url_for('users.profile'))
+
+    return render_template('auth/login.html')
+```
+
+Rate limit this route (see [security.md](security.md)) — password endpoints
+are the ones that get brute-forced.
+
+### Password Change
+
+Require the current password before accepting a new one — a hijacked session
+must not be enough to lock out the real owner:
+
+```python
+@bp.route('/settings/password', methods=['POST'])
+@login_required
+def change_password():
+    current = request.form.get('current_password', '')
+    new = request.form.get('new_password', '')
+    confirm = request.form.get('confirm_password', '')
+
+    if not current_user.check_password(current):
+        flash(t('auth.current_password_wrong'), 'error')
+    elif new != confirm:
+        flash(t('auth.passwords_do_not_match'), 'error')
+    else:
+        current_user.set_password(new)
+        current_user.save()
+        log.info('password_changed', user_id=current_user.id)
+        flash(t('auth.password_changed'), 'success')
+
+    return redirect(url_for('settings.index'))
+```
+
+### Recovery Without Email: CLI Reset
+
+Email-based "forgot password" only works when email is configured. The
+recovery path that always works is a server-side command, runnable by whoever
+operates the installation:
+
+```python
+# app/controllers/cli.py
+import click
+import secrets
+from flask import Blueprint
+from app.models import User
+
+bp = Blueprint('users_cli', __name__, cli_group='users')
+
+
+@bp.cli.command('reset-password')
+@click.argument('email')
+def reset_password(email: str):
+    """Set a new random password for EMAIL and print it once."""
+    user = User.get_by_email(email.strip().lower())
+    if user is None:
+        raise click.ClickException(f'No user with email {email}')
+
+    password = secrets.token_urlsafe(12)
+    user.set_password(password)
+    user.save()
+    click.echo(f'New password for {user.email}: {password}')
+    click.echo('It is shown only once. The user should change it after login.')
+```
+
+```bash
+flask users reset-password admin@example.com
+```
+
+Register the blueprint in `create_app` like any other. If email *is*
+configured, an email-based reset flow can be added on top; the CLI path stays
+as the operator-level fallback either way.
+
+---
+
 ## Session Management
 
 ### Flask Session Configuration
@@ -236,6 +386,9 @@ class User(BaseModel, UserMixin):
 ---
 
 ## Auth Controller
+
+Magic-link variant shown (`auth: magic_links`); the password variant of
+`/login` is in [Email + Password](#email--password) above.
 
 ```python
 # app/controllers/auth.py
@@ -457,13 +610,22 @@ def google_authorized():
 - [x] Regenerate session after login
 - [x] Clear session on logout
 
-### Magic Link Security
+### Magic Link Security (`auth: magic_links`)
 
 - [x] Use `secrets.token_urlsafe(48)` for tokens
 - [x] Short expiry (15 minutes)
 - [x] Single-use tokens
 - [x] Don't reveal if email exists
 - [x] Clean up expired tokens
+
+### Password Security (`auth: password`)
+
+- [x] Werkzeug `generate_password_hash` / `check_password_hash` — never roll your own
+- [x] Only `password_hash` is ever stored; plaintext never logged or flashed
+- [x] One generic failure message — no user-enumeration oracle
+- [x] Current password required to change password
+- [x] CLI reset command as the email-independent recovery path
+- [x] Rate limit `/login`
 
 ### General
 

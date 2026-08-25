@@ -1,6 +1,7 @@
 # Deployment Guide
 
-> Production deployment with Gunicorn, systemd, and Caddy on Digital Ocean
+> Production deployment with Gunicorn, systemd, and Caddy — or Docker when the
+> application is distributed for others to run
 
 ---
 
@@ -13,6 +14,7 @@
 - [Local Development](#local-development)
 - [Production Setup](#production-setup)
 - [Deploy Script](#deploy-script)
+- [Docker Distribution](#docker-distribution)
 - [Health Check](#health-check)
 - [Production Checklist](#production-checklist)
 
@@ -20,7 +22,17 @@
 
 ## Overview
 
-**Stack:**
+Two deployment shapes. Record the choice as `deploy:` in the project
+configuration:
+
+- **`deploy: vps`** (default) — you operate the server. systemd + Gunicorn +
+  Caddy, deploys are a `git pull`. The rest of this section describes it.
+- **`deploy: docker`** — *other people* run your application (an open-source
+  self-hostable product, an on-premise install). You cannot assume their OS,
+  init system, or Python; a container is the distribution artifact. See
+  [Docker Distribution](#docker-distribution).
+
+**VPS stack:**
 - **Server**: Digital Ocean Droplet (or any VPS)
 - **Process Manager**: systemd
 - **WSGI Server**: Gunicorn
@@ -387,6 +399,121 @@ make deploy
 # or
 ./scripts/deploy.sh
 ```
+
+---
+
+## Docker Distribution
+
+Use when `deploy: docker`. The goal is that a stranger runs
+`docker compose up` and gets a working installation — no Python, uv, or
+systemd knowledge required.
+
+### Principles
+
+- **One image, one volume.** Everything mutable — SQLite database, uploaded
+  files, wizard-written configuration — lives under a single mounted volume
+  (`/data`). Upgrading is `docker compose pull && docker compose up -d`; the
+  volume carries the installation across image versions.
+- **Migrations run in the entrypoint**, before Gunicorn starts. With one web
+  container this is safe (the systemd `ExecStartPre` equivalent). If you
+  scale to multiple web replicas, migrations must move to a one-shot job.
+- **Postgres is an opt-in profile**, not a requirement. SQLite on the volume
+  is the default; `DATABASE_URL` switches, same as everywhere else in the
+  blueprint.
+- **TLS is out of scope for the container.** Self-hosters put their own
+  reverse proxy (Caddy, nginx, Traefik) in front. Document that; don't bundle
+  it.
+
+### Dockerfile
+
+```dockerfile
+FROM python:3.12-slim
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /srv/app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev
+
+COPY . .
+
+ENV PATH="/srv/app/.venv/bin:$PATH" \
+    DATA_DIR=/data \
+    DATABASE_URL=sqlite:////data/app.db \
+    PORT=8000
+VOLUME /data
+EXPOSE 8000
+
+ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
+```
+
+```bash
+#!/bin/sh
+# scripts/docker-entrypoint.sh
+set -e
+mkdir -p "$DATA_DIR"
+flask db upgrade
+exec gunicorn wsgi:app -w "${WEB_CONCURRENCY:-4}" -b "0.0.0.0:${PORT}"
+```
+
+### docker-compose.yml
+
+```yaml
+services:
+  web:
+    image: yourorg/yourapp:latest
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - app_data:/data
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+
+  # jobs: true only — same image, second process, shared volume
+  worker:
+    image: yourorg/yourapp:latest
+    command: ["flask", "jobs", "run"]
+    volumes:
+      - app_data:/data
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+    depends_on:
+      - web
+
+  # optional: `docker compose --profile postgres up`
+  postgres:
+    image: postgres:16
+    profiles: ["postgres"]
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+
+volumes:
+  app_data:
+  pg_data:
+```
+
+The worker service exists only when the project uses the jobs layer
+([jobs.md](../jobs.md)); it runs the same image with a different command so
+there is never a second artifact to build or version.
+
+### Runtime-written configuration
+
+A self-hosted product with a first-run web wizard cannot get all its config
+from the environment — the wizard runs *after* boot. The pattern:
+
+1. The image boots with safe defaults (SQLite on `/data`, no email).
+2. The wizard writes its answers to a config file on the volume
+   (e.g. `/data/config.env`) and settings rows in the database.
+3. `create_app` layers config: defaults → `/data/config.env` → real
+   environment variables (env always wins, so operators can override).
+4. Secrets the wizard generates (e.g. `SECRET_KEY` if the operator didn't
+   set one) are written to the volume once and reused — never regenerated
+   on restart, or every deploy logs out every user.
 
 ---
 

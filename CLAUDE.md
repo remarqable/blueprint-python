@@ -24,6 +24,13 @@ reference, not for context.
 | `patterns/tenancy.md` | `tenancy: shared` |
 | `patterns/plugins.md` | `plugins: true` (requires `tenancy: shared` for the per-tenant model) |
 | `patterns/theming.md` | `theming: true` |
+| `patterns/storage.md` | `uploads: true` |
+| `patterns/jobs.md` | `jobs: true` |
+
+Two further decisions select *sections within* core docs rather than layer
+docs: `auth` picks one strategy inside `patterns/core/auth.md`, and `deploy`
+picks one shape inside `patterns/core/deployment.md`. The same rule applies —
+implement the chosen branch, do not blend.
 
 ---
 
@@ -38,6 +45,10 @@ plugins: false         # true | false
 theming: false         # true | false
 audit_logging: false   # true | false
 database: sqlite       # sqlite | postgres  (switchable later via DATABASE_URL)
+auth: magic_links      # magic_links | password
+uploads: false         # true | false
+jobs: false            # true | false
+deploy: vps            # vps | docker
 ```
 
 ### The questions to ask
@@ -67,6 +78,23 @@ one-variable switch later, provided you follow
 [core/portability.md](patterns/core/portability.md). Choose PostgreSQL now only
 if you already know you need high write concurrency, JSONB querying, or full-text
 search.
+
+**6. Can every login depend on outbound email?** → `auth`. Magic links are the
+default and the least code — but every login sends an email. If the product
+must install, authenticate, or recover accounts with **no email service
+configured** (self-hostable products especially), choose `password`. See
+[core/auth.md](patterns/core/auth.md#overview).
+
+**7. Do users upload files?** → `uploads` (logos, avatars, images,
+attachments). Adds the storage interface and the `Upload` model.
+
+**8. Does work happen outside requests?** → `jobs` (email batches, image
+processing, scheduled cleanup, tenant purge). Adds the DB-backed queue and a
+worker process.
+
+**9. Who runs this in production?** → `deploy`. `vps` (default) when you
+operate the server; `docker` when the application is distributed for others
+to run.
 
 ---
 
@@ -246,9 +274,9 @@ yourapp/
 | Frontend | Tailwind CSS v4 + Alpine.js + HTMX | Utility-first, no npm, progressive enhancement |
 | i18n | JSON catalogs | Simple, runtime-loaded |
 | Logging | structlog | Structured JSON in production |
-| Auth | Flask-Login + magic links | Easy to start, extensible |
+| Auth | Flask-Login + magic links *or* passwords | Magic links need email; passwords don't — see `auth:` |
 | Testing | pytest | SQLite in-memory, PostgreSQL in CI |
-| Serving | Gunicorn + systemd + Caddy | Automatic HTTPS, no containers |
+| Serving | Gunicorn + systemd + Caddy, or Docker | VPS you operate vs app you distribute — see `deploy:` |
 
 ---
 
@@ -495,6 +523,8 @@ class ForbiddenError(AppError):
 | [tenancy.md](patterns/tenancy.md) | `tenancy: shared` | Organizations, resolution, automatic scoping, roles |
 | [plugins.md](patterns/plugins.md) | `plugins: true` | Per-tenant installable features and routes |
 | [theming.md](patterns/theming.md) | `theming: true` | Per-tenant branding and template overrides |
+| [storage.md](patterns/storage.md) | `uploads: true` | File uploads, image variants, safe serving |
+| [jobs.md](patterns/jobs.md) | `jobs: true` | DB-backed queue, worker process, retries |
 
 ---
 

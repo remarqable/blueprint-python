@@ -17,6 +17,7 @@ works at runtime — Jinja resolves templates per render, not at boot.
 - [Template Overrides](#template-overrides)
 - [Theme Assets](#theme-assets)
 - [Theme Packaging](#theme-packaging)
+- [Theme Installation](#theme-installation)
 - [Security](#security)
 - [Single-Tenant Theming](#single-tenant-theming)
 
@@ -247,6 +248,67 @@ an override it does not ship, or ships one it does not declare, is the source of
 Add a smoke test that renders every page under every installed theme. Themes
 break silently: nothing errors until a tenant visits the one page whose override
 references a variable you renamed.
+
+---
+
+## Theme Installation
+
+By default themes ship with the application: adding one is a deploy. A
+self-hostable product can additionally support **runtime installation by the
+installation operator** (platform admin) — a portable ZIP containing exactly
+the on-disk layout above, `theme.json` at its root.
+
+The trust model does not change: **installing a theme is deploying code.**
+Only installation-level operators — the people who could equally `git pull` or
+swap the container image — may install one. Tenants still only *select and
+configure* from the installed set. If your admin role is per-tenant rather
+than per-installation, this feature is not for them.
+
+```python
+# app/platform/theming.py
+import json, zipfile
+from pathlib import Path
+
+INSTALLED_THEMES_DIR = Path(current_app.config['DATA_DIR']) / 'themes'
+
+
+def install_theme(zip_path: Path) -> str:
+    """Unpack a theme ZIP into the installed-themes directory. Operator-only."""
+    with zipfile.ZipFile(zip_path) as zf:
+        manifest = json.loads(zf.read('theme.json'))
+        slug = manifest['slug']
+        if not re.fullmatch(r'[a-z0-9-]{1,50}', slug):
+            raise ValidationError('Invalid theme slug')
+
+        target = INSTALLED_THEMES_DIR / slug
+        for member in zf.namelist():
+            # zip entries are attacker-controlled paths: no absolute paths,
+            # no traversal out of the target directory
+            dest = (target / member).resolve()
+            if not dest.is_relative_to(target.resolve()):
+                raise ValidationError(f'Unsafe path in theme package: {member}')
+        zf.extractall(target)
+
+    rescan_themes()          # rebuild AVAILABLE_THEMES from disk
+    return slug
+```
+
+Notes that keep this honest:
+
+- **Two theme roots.** Built-in themes stay in `app/views/themes/`;
+  operator-installed ones land on the data volume
+  (`$DATA_DIR/themes/`) so they survive image upgrades. Add the installed
+  root to the Jinja search path (a `ChoiceLoader`) and to the `theme_static`
+  whitelist scan.
+- **Rescan, don't restart.** `AVAILABLE_THEMES` is rebuilt after install/
+  uninstall. Template *content* needs no reload — Jinja resolves per render —
+  but with multiple workers the rescan must happen per worker: keep
+  `AVAILABLE_THEMES` cheap to rebuild and refresh it on a version stamp, the
+  same idea as the plugin enablement check.
+- **Uninstall = deactivate first.** Refuse to remove a theme any tenant has
+  active; fall back to `default` explicitly, never implicitly.
+- **The ZIP is code** — see [Security](#security). Runtime install narrows
+  *who deploys*, not *what a theme can do*.
 
 ---
 
