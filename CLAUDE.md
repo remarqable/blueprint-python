@@ -507,6 +507,8 @@ covers.
 - Logical properties (`ms-`/`me-`/`ps-`/`pe-`/`text-start`), never `ml-`/`mr-`/
   `text-left` — physical properties silently break RTL.
 - Every interactive component carries its own ARIA; Tailwind ships none.
+- With `plugins: true`, plugin templates use `plugin_url_for`, never `url_for`,
+  and no two plugin versions are ever registered on the same URL prefix.
 
 ---
 

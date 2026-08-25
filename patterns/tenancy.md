@@ -378,8 +378,8 @@ def provision(name: str, slug: str, owner: User) -> Organization:
         db.session.add(org)
         db.session.flush()                       # need org.id
         db.session.add(Membership(user_id=owner.id, org_id=org.id, role='owner'))
-        for slug_ in DEFAULT_PLUGINS:            # see plugins.md
-            install_plugin(org.id, slug_)
+        for slug_, major in DEFAULT_PLUGINS:     # see plugins.md
+            install_plugin(org.id, slug_, major)
     return org
 ```
 
