@@ -82,7 +82,7 @@
   <button hx-get="/profile/edit-name"
           hx-target="#name-display"
           hx-swap="outerHTML"
-          class="btn btn-sm btn-link">Edit</button>
+          class="text-sm text-brand-600 hover:underline">Edit</button>
 </div>
 ```
 
@@ -92,13 +92,13 @@
       hx-post="/profile/name"
       hx-target="#name-display"
       hx-swap="outerHTML">
-  <input type="text" name="name" value="{{ user.name }}" class="form-control">
-  <button type="submit" class="btn btn-primary btn-sm">Save</button>
+  <input type="text" name="name" value="{{ user.name }}" class="input">
+  <button type="submit" class="btn-primary text-xs">Save</button>
   <button type="button"
           hx-get="/profile/name-display"
           hx-target="#name-display"
           hx-swap="outerHTML"
-          class="btn btn-secondary btn-sm">Cancel</button>
+          class="btn-secondary text-xs">Cancel</button>
 </form>
 ```
 
@@ -111,7 +111,7 @@
        hx-get="/search"
        hx-trigger="keyup changed delay:300ms"
        hx-target="#search-results"
-       class="form-control">
+       class="input">
 
 <div id="search-results">
   <!-- Results appear here -->
@@ -131,7 +131,7 @@
        hx-trigger="revealed"
        hx-swap="outerHTML"
        hx-target="this">
-    <span class="spinner-border spinner-border-sm"></span> Loading...
+    <span class="inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent"></span> Loading…
   </div>
   {% endif %}
 </div>
@@ -145,11 +145,11 @@
         hx-trigger="change"
         hx-vals='{"key": "theme"}'
         hx-target="#theme-status"
-        class="form-select">
+        class="select">
   <option value="light">Light</option>
   <option value="dark">Dark</option>
 </select>
-<div id="theme-status" class="form-text text-success"></div>
+<p id="theme-status" class="mt-1 text-sm text-green-600" role="status" aria-live="polite"></p>
 ```
 
 ### Delete with Confirmation
@@ -159,7 +159,7 @@
         hx-confirm="Are you sure you want to delete this?"
         hx-target="closest .item"
         hx-swap="outerHTML"
-        class="btn btn-danger btn-sm">
+        class="btn-danger text-xs">
   Delete
 </button>
 ```
@@ -240,14 +240,14 @@ def create_item():
       hx-swap="outerHTML">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
-  <div class="mb-3">
-    <label for="name" class="form-label">Name</label>
+  <div>
+    <label for="name" class="label">Name</label>
     <input type="text" name="name" id="name"
            value="{{ user.name }}"
-           class="form-control">
+           class="input">
   </div>
 
-  <button type="submit" class="btn btn-primary">Save</button>
+  <button type="submit" class="btn-primary">Save</button>
 </form>
 ```
 
@@ -282,7 +282,7 @@ def edit_profile():
        hx-post="/validate/email"
        hx-trigger="blur"
        hx-target="#email-error"
-       class="form-control">
+       class="input">
 <div id="email-error" class="invalid-feedback"></div>
 ```
 
@@ -305,25 +305,29 @@ def validate_email():
 
 ```html
 <!-- In base.html -->
-<div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3">
+<!-- app/views/partials/_toasts.html -->
+<div x-data="{ toasts: [] }"
+     @toast.window="
+       const id = Date.now();
+       toasts.push({ id, ...$event.detail });
+       setTimeout(() => toasts = toasts.filter(t => t.id !== id), 5000)"
+     class="fixed top-4 end-4 z-50 flex flex-col gap-2"
+     role="status" aria-live="polite">
+  <template x-for="t in toasts" :key="t.id">
+    <div x-transition
+         class="w-72 rounded-md px-4 py-3 text-sm shadow-lg ring-1"
+         :class="t.level === 'error'
+                 ? 'bg-red-50 text-red-800 ring-red-200'
+                 : 'bg-green-50 text-green-800 ring-green-200'">
+      <p class="font-medium" x-text="t.title || 'Notification'"></p>
+      <p x-text="t.message"></p>
+    </div>
+  </template>
 </div>
 
-<script>
-document.body.addEventListener('showToast', function(e) {
-  const container = document.getElementById('toast-container');
-  const toast = document.createElement('div');
-  toast.className = 'toast show';
-  toast.innerHTML = `
-    <div class="toast-header">
-      <strong class="me-auto">${e.detail.title || 'Notification'}</strong>
-      <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
-    </div>
-    <div class="toast-body">${e.detail.message}</div>
-  `;
-  container.appendChild(toast);
-  setTimeout(() => toast.remove(), 5000);
-});
-</script>
+<!-- No JS wiring needed: HX-Trigger dispatches a `toast` window event and
+     Alpine picks it up. Alpine initializes swapped-in markup automatically. -->
+
 ```
 
 ### Triggering from Server
@@ -352,8 +356,8 @@ def delete_item():
 ```html
 <button hx-post="/action"
         hx-target="#result"
-        class="btn btn-primary">
-  <span class="htmx-indicator spinner-border spinner-border-sm me-1"></span>
+        class="btn-primary">
+  <span class="htmx-indicator me-1 inline-block size-4 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
   Save
 </button>
 
@@ -381,8 +385,8 @@ def delete_item():
      hx-swap="innerHTML">
   <!-- Skeleton placeholder -->
   <div class="placeholder-glow">
-    <span class="placeholder col-12"></span>
-    <span class="placeholder col-8"></span>
+    <div class="h-4 w-full animate-pulse rounded bg-slate-200"></div>
+    <div class="mt-2 h-4 w-2/3 animate-pulse rounded bg-slate-200"></div>
   </div>
 </div>
 ```

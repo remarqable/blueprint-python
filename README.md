@@ -74,7 +74,7 @@ permission check; carrying it from day one costs one indexed column.
 | Database | SQLite (default) → PostgreSQL, switchable via `DATABASE_URL` |
 | ORM | SQLAlchemy 2.0 |
 | Migrations | Alembic, applied at deploy |
-| Frontend | Bootstrap 5 + HTMX, no build pipeline |
+| Frontend | Tailwind CSS v4 + Alpine.js + HTMX (no npm) |
 | Testing | pytest — SQLite in-memory locally, PostgreSQL in CI |
 | Serving | Gunicorn + systemd + Caddy (automatic HTTPS) |
 
@@ -82,7 +82,7 @@ permission check; carrying it from day one costs one indexed column.
 
 - **Keep it simple, explicit, and local.** No magic.
 - **Fat models, thin controllers, dumb templates.**
-- **Server-rendered HTML + HTMX.** No SPA, no npm.
+- **Server-rendered HTML + HTMX.** No SPA, no npm, no `node_modules`.
 - **Safe by default.** Tenant isolation is enforced in one place, not remembered
   in every query.
 - **SQLite by default.** PostgreSQL is one environment variable away.
@@ -92,6 +92,9 @@ permission check; carrying it from day one costs one indexed column.
 
 A single VPS: systemd for process management, Gunicorn as the WSGI server, Caddy
 for reverse proxy and automatic HTTPS. No Docker, no orchestration.
+
+CSS is built locally and committed, so deploying stays a `git pull` — there is no
+Node, no Tailwind binary, and no build step on the server.
 
 ```bash
 make deploy

@@ -28,7 +28,7 @@ Offer both; most tenants only ever want the first.
 
 | Level | Mechanism | Who | Risk |
 |-------|-----------|-----|------|
-| **Branding** | CSS variables + logo, stored per tenant | any tenant, self-serve | none |
+| **Branding** | Tailwind theme variables + logo, per tenant | any tenant, self-serve | none |
 | **Template override** | files on disk shadowing base templates | you, or vetted partners | executes code — see [Security](#security) |
 
 ---
@@ -50,10 +50,35 @@ class Organization(BaseModel):
 {# app/views/layouts/base.html #}
 {% if g.org and g.org.brand_primary %}
 <style>
-  :root { --bs-primary: {{ g.org.brand_primary }}; }
+  :root {
+    --color-brand-500: {{ g.org.brand_primary }};
+    --color-brand-600: {{ g.org.brand_primary }};
+    --color-brand-700: {{ g.org.brand_primary }};
+  }
 </style>
 {% endif %}
 ```
+
+This works because Tailwind v4 compiles every theme utility to a CSS variable:
+`bg-brand-600` is `background-color: var(--color-brand-600)`. Overriding the
+variable at `:root` re-skins every button, link, and active state on the page
+without recompiling anything — the tenant's colour is data, not a build.
+
+For a full brand scale rather than one flat colour, store the base hue and derive
+the ramp in `oklch()`, which keeps perceived lightness consistent across steps:
+
+```html
+<style>
+  :root {
+    --color-brand-500: oklch(0.59 0.20 {{ g.org.brand_hue }});
+    --color-brand-600: oklch(0.52 0.20 {{ g.org.brand_hue }});
+    --color-brand-700: oklch(0.45 0.18 {{ g.org.brand_hue }});
+  }
+</style>
+```
+
+Validate `brand_hue` as a number in `0..360`, exactly as you validate the hex
+form below.
 
 **Validate the colour on write** with a strict `#RRGGBB` pattern. Interpolating
 unvalidated tenant input inside a `<style>` block is a CSS injection, and Jinja's
@@ -171,6 +196,33 @@ def theme_asset(filename: str) -> str:
 
 `send_from_directory` rejects `..` traversal, but the whitelist check is what
 stops an attacker enumerating your theme directory in the first place.
+
+---
+
+## Theme CSS and the Build
+
+A theme's own `theme.css` is a plain stylesheet, not a second Tailwind build. It
+should contain variable overrides and at most a handful of rules:
+
+```css
+/* app/views/themes/midnight/static/theme.css */
+:root {
+  --color-brand-500: oklch(0.55 0.19 265);
+  --radius-card: 0.25rem;
+}
+```
+
+If a theme needs utility classes that no base template uses, Tailwind will not
+have compiled them — the build scans your templates, and an unused class does not
+exist in the output. Two ways out, in order of preference:
+
+1. Keep theme overrides to variables and existing utilities. Covers almost
+   everything and needs no build change.
+2. Add the theme directory as a source so its classes compile into the shared
+   stylesheet: `@source "../../views/themes";` in `input.css`.
+
+Do not give each theme its own Tailwind build. You would ship one stylesheet per
+theme, and every tenant would download utilities they already have.
 
 ---
 

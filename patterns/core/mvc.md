@@ -248,38 +248,35 @@ class Setting(BaseModel):
 
 ### Base Layout
 
+Full layout, including the CSRF header and skip link:
+[frontend.md § Component Patterns](frontend.md#component-patterns).
+
 ```html
 <!-- app/views/layouts/base.html -->
 <!DOCTYPE html>
-<html lang="{{ lang }}" dir="{{ 'rtl' if is_rtl else 'ltr' }}">
+<html lang="{{ lang }}" dir="{{ 'rtl' if is_rtl else 'ltr' }}"
+      class="{{ 'dark' if theme_mode == 'dark' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Your App{% endblock %}</title>
 
-  <link href="/static/css/bootstrap.min.css" rel="stylesheet">
-  <link href="/static/css/app.css" rel="stylesheet">
-  <script src="/static/js/htmx.min.js"></script>
-
+  <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
+  <script src="{{ url_for('static', filename='js/htmx.min.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='js/alpine.min.js') }}"></script>
   {% block head %}{% endblock %}
 </head>
-<body class="bg-light">
+<body class="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100"
+      hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'>
+
   {% include 'partials/_navbar.html' %}
 
-  <main class="container py-4">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% for category, message in messages %}
-      <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show">
-        {{ message }}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-      </div>
-      {% endfor %}
-    {% endwith %}
-
+  <main id="main" class="mx-auto max-w-5xl px-4 py-8">
+    {% include 'partials/_flash.html' %}
     {% block content %}{% endblock %}
   </main>
 
-  <script src="/static/js/bootstrap.bundle.min.js"></script>
+  {% include 'partials/_toasts.html' %}
   {% block scripts %}{% endblock %}
 </body>
 </html>
@@ -291,45 +288,45 @@ class Setting(BaseModel):
 <!-- app/views/users/profile.html -->
 {% extends 'layouts/base.html' %}
 
-{% block title %}{{ user.name }} - Profile{% endblock %}
+{% block title %}{{ user.name }} — {{ _('user.profile') }}{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-8">
-    <div class="card">
-      <div class="card-body">
-        <div class="d-flex align-items-center mb-4">
-          {% if user.avatar_url %}
-          <img src="{{ user.avatar_url }}" class="rounded-circle me-3" width="80" height="80">
-          {% else %}
-          <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-3"
-               style="width: 80px; height: 80px; font-size: 2rem;">
-            {{ user.get_initials() }}
-          </div>
-          {% endif %}
-
-          <div class="flex-grow-1">
-            <h2 class="mb-0">{{ user.name }}</h2>
-            <p class="text-muted mb-0">{{ user.email }}</p>
-          </div>
-
-          <a href="{{ url_for('users.edit_profile') }}" class="btn btn-outline-primary">
-            Edit Profile
-          </a>
+<div class="mx-auto max-w-2xl">
+  <div class="card">
+    <div class="flex items-center gap-4">
+      {% if user.avatar_url %}
+        <img src="{{ user.avatar_url }}" alt="" class="size-20 rounded-full">
+      {% else %}
+        <div class="flex size-20 items-center justify-center rounded-full
+                    bg-brand-600 text-3xl text-white" aria-hidden="true">
+          {{ user.get_initials() }}
         </div>
+      {% endif %}
 
-        <hr>
-
-        <dl class="row mb-0">
-          <dt class="col-sm-3">Member Since</dt>
-          <dd class="col-sm-9">{{ user.created_at.strftime('%B %d, %Y') }}</dd>
-        </dl>
+      <div class="flex-1">
+        <h1 class="text-xl font-semibold">{{ user.name }}</h1>
+        <p class="text-sm text-slate-600 dark:text-slate-400">{{ user.email }}</p>
       </div>
+
+      <a href="{{ url_for('users.edit_profile') }}" class="btn-secondary">
+        {{ _('user.edit_profile') }}
+      </a>
     </div>
+
+    <hr class="my-6 border-slate-200 dark:border-slate-700">
+
+    <dl class="grid grid-cols-3 gap-2 text-sm">
+      <dt class="text-slate-500">{{ _('user.member_since') }}</dt>
+      <dd class="col-span-2">{{ user.created_at | localdate }}</dd>
+    </dl>
   </div>
 </div>
 {% endblock %}
 ```
+
+`text-slate-600` rather than `text-slate-500` for the email: the lighter shade
+falls below WCAG AA on white. See
+[frontend.md § Accessibility](frontend.md#accessibility).
 
 ### Settings Form with HTMX
 
@@ -338,32 +335,33 @@ class Setting(BaseModel):
 {% extends 'layouts/base.html' %}
 
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-8">
-    <h2 class="mb-4">Settings</h2>
+<div class="mx-auto max-w-2xl">
+  <h1 class="mb-6 text-xl font-semibold">{{ _('settings.title') }}</h1>
 
-    <div class="card">
-      <div class="card-body">
-        <!-- Theme Setting with HTMX -->
-        <div class="mb-3">
-          <label for="theme" class="form-label">Theme</label>
-          <select id="theme" name="value" class="form-select"
-                  hx-post="{{ url_for('settings.update') }}"
-                  hx-trigger="change"
-                  hx-vals='{"key": "theme"}'
-                  hx-target="#theme-status"
-                  hx-swap="innerHTML">
-            <option value="light" {{ 'selected' if settings.theme == 'light' }}>Light</option>
-            <option value="dark" {{ 'selected' if settings.theme == 'dark' }}>Dark</option>
-          </select>
-          <div id="theme-status" class="form-text text-success"></div>
-        </div>
-      </div>
+  <div class="card space-y-4">
+    <div>
+      <label for="theme" class="label">{{ _('settings.theme') }}</label>
+      <select id="theme" name="value" class="select mt-1"
+              hx-post="{{ url_for('settings.update') }}"
+              hx-trigger="change"
+              hx-vals='{"key": "theme"}'
+              hx-target="#theme-status"
+              hx-swap="innerHTML">
+        <option value="light" {{ 'selected' if settings.theme == 'light' }}>
+          {{ _('settings.theme.light') }}</option>
+        <option value="dark" {{ 'selected' if settings.theme == 'dark' }}>
+          {{ _('settings.theme.dark') }}</option>
+      </select>
+      <p id="theme-status" class="mt-1 text-sm text-green-600" role="status"
+         aria-live="polite"></p>
     </div>
   </div>
 </div>
 {% endblock %}
 ```
+
+`role="status"` with `aria-live="polite"` makes the HTMX confirmation audible to
+a screen reader instead of purely visual.
 
 ---
 
@@ -537,12 +535,12 @@ def update():
 ✅ **Do:**
 - Use partials for reusable components (prefix with `_`)
 - Use HTMX attributes for interactivity
-- Use Bootstrap classes exclusively
+- Use Tailwind utilities inline; reach for a component class only when it repeats
 - Use i18n for all user-visible text
 
 ❌ **Don't:**
 - Don't put complex logic in templates
-- Don't use inline styles
+- Don't use inline styles (the one exception is per-tenant brand variables)
 - Don't hardcode text strings
 - Don't use `|safe` unless content is trusted
 

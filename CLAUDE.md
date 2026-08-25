@@ -89,7 +89,21 @@ touch app/middleware/__init__.py app/platform/__init__.py
 If `plugins: true`, also `mkdir -p plugins`.
 If `theming: true`, also `mkdir -p app/views/themes`.
 
-### Step 2: Dependencies
+### Step 2: Frontend assets
+
+```bash
+mkdir -p bin
+make css                 # downloads the Tailwind standalone binary, builds app.css
+curl -o app/static/js/htmx.min.js   https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js
+curl -o app/static/js/alpine.min.js https://unpkg.com/alpinejs@3.14.9/dist/cdn.min.js
+echo "bin/" >> .gitignore
+```
+
+`app/static/css/input.css` holds the design tokens and component layer —
+see [core/frontend.md](patterns/core/frontend.md#design-tokens). Commit the built
+`app.css` so deployment stays a `git pull` with no toolchain on the server.
+
+### Step 3: Dependencies
 
 ```bash
 cat > requirements.in <<'EOF'
@@ -108,7 +122,7 @@ EOF
 make venv && source venv/bin/activate && make compile && make install
 ```
 
-### Step 3: Environment
+### Step 4: Environment
 
 ```bash
 cat > config/local.env <<'EOF'
@@ -121,7 +135,7 @@ BASE_DOMAIN=localhost
 EOF
 ```
 
-### Step 4: Platform layer
+### Step 5: Platform layer
 
 | File | Source |
 |------|--------|
@@ -134,14 +148,14 @@ EOF
 | `app/platform/i18n.py` | [core/i18n.md](patterns/core/i18n.md) |
 | `app/platform/tenant.py` | [tenancy.md](patterns/tenancy.md) — only if `tenancy: shared` |
 
-### Step 5: First model, controller, view
+### Step 6: First model, controller, view
 
 - `app/models/user.py` → [core/mvc.md](patterns/core/mvc.md#models-fat-models)
 - `app/controllers/main.py` → [core/mvc.md](patterns/core/mvc.md#controllers-thin-controllers)
 - `app/views/layouts/base.html` → [core/mvc.md](patterns/core/mvc.md#views-templates)
 - `app/__init__.py` → [§ Application Factory](#application-factory)
 
-### Step 6: Run
+### Step 7: Run
 
 ```bash
 make run       # runs `flask db upgrade`, then the dev server on :8000
@@ -155,7 +169,7 @@ make run       # runs `flask db upgrade`, then the dev server on :8000
 
 - **Keep it simple, explicit, and local.** No magic, no over-engineering.
 - **MVC**: fat models, thin controllers, dumb templates.
-- **Server-rendered HTML + HTMX.** No SPA, no build pipeline.
+- **Server-rendered HTML + HTMX.** No SPA. One CSS build, run locally, never on the server.
 - **Safe by default.** Tenant isolation is enforced in one place, not in every
   query. Security that depends on remembering is not security.
 - **i18n from day 1.**
@@ -187,7 +201,10 @@ yourapp/
 │   ├── views/                # Jinja2 (templates/ is called views/ here)
 │   │   ├── layouts/  partials/  errors/
 │   │   └── themes/           # theming: true only
-│   ├── static/               # css, js, img — vendored, no CDN
+│   ├── static/
+│   │   ├── css/input.css     # Tailwind source: tokens + component layer
+│   │   ├── css/app.css       # BUILT — committed, never hand-edited
+│   │   └── js/               # htmx.min.js, alpine.min.js — vendored
 │   ├── lang/                 # en.json, es.json
 │   ├── middleware/           # auth, csrf, ratelimit
 │   └── platform/             # logger, i18n, errors, tenant, plugins, theming
@@ -209,7 +226,7 @@ yourapp/
 | Database | SQLite → PostgreSQL | No server to start; switchable via `DATABASE_URL` |
 | ORM | SQLAlchemy 2.0 | Declarative, portable across both engines |
 | Migrations | Alembic (Flask-Migrate) | Run once at deploy, never in-process |
-| Frontend | Bootstrap 5 + HTMX | No build step, progressive enhancement |
+| Frontend | Tailwind CSS v4 + Alpine.js + HTMX | Utility-first, no npm, progressive enhancement |
 | i18n | JSON catalogs | Simple, runtime-loaded |
 | Logging | structlog | Structured JSON in production |
 | Auth | Flask-Login + magic links | Easy to start, extensible |
@@ -447,7 +464,7 @@ class ForbiddenError(AppError):
 | [core/security.md](patterns/core/security.md) | CSRF, rate limiting, checklist |
 | [core/i18n.md](patterns/core/i18n.md) | Internationalization |
 | [core/htmx.md](patterns/core/htmx.md) | Interactive patterns |
-| [core/frontend.md](patterns/core/frontend.md) | Bootstrap 5 + HTMX |
+| [core/frontend.md](patterns/core/frontend.md) | Tailwind v4, Alpine, component layer, a11y |
 | [core/mobile-navigation.md](patterns/core/mobile-navigation.md) | Responsive navigation |
 | [core/testing.md](patterns/core/testing.md) | pytest, fixtures, isolation tests |
 | [core/typing.md](patterns/core/typing.md) | Type hints and mypy |
@@ -470,7 +487,7 @@ class ForbiddenError(AppError):
 1. Ask the [configuration questions](#the-questions-to-ask). Do not guess.
 2. Record answers in [Project Configuration](#project-configuration).
 3. Read all of `patterns/core/`. Read layer docs **only** where the condition holds.
-4. Execute Quick Start steps 1–6 in order.
+4. Execute Quick Start steps 1–7 in order.
 5. Verify `make run` serves `/health`.
 
 **Adding a feature:** find the relevant pattern doc via the index above and
@@ -485,6 +502,11 @@ covers.
 - Migrations at deploy, never inside `create_app`.
 - With `tenancy: shared`, business models inherit `OrgScoped` and queries are
   never manually filtered by `org_id`.
+- Run `make css` after touching any template, and commit the result — an
+  uncompiled class renders unstyled in production and nowhere else.
+- Logical properties (`ms-`/`me-`/`ps-`/`pe-`/`text-start`), never `ml-`/`mr-`/
+  `text-left` — physical properties silently break RTL.
+- Every interactive component carries its own ARIA; Tailwind ships none.
 
 ---
 
