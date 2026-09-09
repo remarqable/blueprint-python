@@ -10,6 +10,7 @@
 - [The Build Step](#the-build-step)
 - [File Structure](#file-structure)
 - [Design Tokens](#design-tokens)
+- [Visual Design Rules](#visual-design-rules)
 - [The Component Layer](#the-component-layer)
 - [Alpine.js](#alpinejs)
 - [Alpine + HTMX](#alpine--htmx)
@@ -158,6 +159,110 @@ Tailwind v4 is configured in CSS. There is no `tailwind.config.js`.
 `bg-brand-500` compiles to `background-color: var(--color-brand-500)`. Override
 that variable anywhere in the cascade and every utility using it follows — the
 mechanism per-tenant branding relies on.
+
+---
+
+## Visual Design Rules
+
+> Constraints, not suggestions. Break one and say so in the commit message,
+> with the reason. `tests/test_platform/test_ui_budgets.py` enforces the
+> countable ones.
+
+### Type
+
+- **Four sizes and two weights per screen.** Reaching for a fifth size usually
+  means a hierarchy problem being solved with type instead of with spacing.
+- **No bespoke sizes.** `text-[11px]` is how a scale of four becomes a scale of
+  nine. Use the scale; if the scale is wrong, change the scale.
+- Reuse a size across roles rather than inventing one for each role.
+
+### Spacing
+
+- **Every spacing, size and radius divisible by 4, preferably 8.** Tailwind's
+  `.5` steps are 2px multiples — `mt-1.5` is 6px, `gap-2.5` is 10px — so they
+  break this rule while looking like they belong to the scale.
+- Space *inside* elements deliberately, not only between them.
+- Group related things tight and unrelated things loose. Proximity does work
+  that labels should not have to.
+
+### Color
+
+- **60 / 30 / 10.** Sixty percent neutral, thirty complementary (near-black,
+  borders, secondary text), ten brand accent.
+- **Build depth with tints of one color, not with more colors.**
+- **The accent is a budget.** Spend it on the one thing the reader should look
+  at. Everything highlighted means nothing is.
+
+### Visuals
+
+- Flat over gradient, simple over flashy. No stacked shadows.
+- Visuals communicate before they decorate.
+- **Reuse a motif to connect related parts of a screen.** The highest-leverage
+  rule here: a category's tone appears as its pill, the band on its card, its
+  icon and its rule in the home feed, so the same colour means the same thing
+  in four places.
+- Cut one thing before calling it done.
+
+### Copy
+
+- Shortest phrasing that stays unambiguous. Two words beat four.
+- Do not repeat a word from the nearby heading. Under "Categories", the button
+  is "Add", not "Add category".
+- Name the action, not the abstraction: "Save changes", never "Submit".
+- An action keeps its name through the flow: a **Publish** button produces a
+  **Published** toast.
+- Active voice, sentence case. Errors say what broke and how to fix it; empty
+  states invite an action.
+
+### Motion
+
+There are no route transitions to choreograph in a server-rendered app, so
+this is short:
+
+- Motion explains a state change — where something came from, what it became.
+  One orchestrated moment beats five scattered effects.
+- **`prefers-reduced-motion` is honoured globally** in `input.css`, not per
+  component, because the components that forget are the ones it is for.
+  Durations collapse to a single frame rather than to `none`: a spinner that
+  stops spinning stops saying anything.
+
+### The two standing exceptions
+
+Written down so nobody deletes them citing a rule, and nobody adds a third
+without arguing for it.
+
+**Six category hues, against "tints of one color."** The hue is the
+identifier, not decoration — it is the motif that ties an archive card to a
+pill to a row in the feed. Kept deliberately quiet: `-50` grounds, `-600`
+marks, and a short band, so it reads as a system rather than as a palette.
+
+**The accent is the tenant's, so 60/30/10 cannot be guaranteed.**
+`--color-brand-*` is org-configurable (see [theming](../theming.md)). An
+organization that picks red gets primary buttons that read as destructive, and
+no rule here can prevent it. Either constrain the hue range in the brand
+picker or accept it; today we accept it.
+
+### Self-check before calling a UI change done
+
+The first three are the test; run it. The rest need eyes.
+
+1. `uv run pytest tests/test_platform/test_ui_budgets.py` — type, bespoke
+   sizes, off-grid spacing, reduced motion.
+2. Count accent uses on the screen. More than roughly a tenth of the surface?
+3. Read every label aloud. Any word repeated from its own heading? Any label
+   describing the system rather than the reader's action?
+4. Name the one element the reader should notice first. Is it the most
+   emphasized thing there?
+5. Remove one accessory. Which one did you remove?
+
+### Standing debt
+
+The budgets in the test are ratchets set at what each page does today, not at
+the target. Off-grid spacing is the real debt — several dozen `.5` steps
+across the shell. They are not rounded in bulk because that is a visual change
+needing an eye rather than a script. Lower a budget when you have removed
+something; raising one is a decision to argue for, not a way to make a build
+pass.
 
 ---
 
