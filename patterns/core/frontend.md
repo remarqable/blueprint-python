@@ -168,12 +168,25 @@ mechanism per-tenant branding relies on.
 > with the reason. `tests/test_platform/test_ui_budgets.py` enforces the
 > countable ones.
 
+### Which surfaces these apply to
+
+- **The app-owned shell** (`views/community`, `views/layouts`, `views/orgs`) —
+  unconditionally. This is the product.
+- **Built-in themes** — yes. They ship with us, they are the first thing a
+  visitor sees, and they are what a theme author copies.
+- **Installed third-party themes** — no, and do not try. A theme *is*
+  somebody's design; imposing our type scale on it would defeat the point of
+  theming. Lead by example instead.
+
 ### Type
 
-- **Four sizes and two weights per screen.** Reaching for a fifth size usually
+- **Four sizes and two weights on an app screen.** Reaching for a fifth size usually
   means a hierarchy problem being solved with type instead of with spacing.
-- **No bespoke sizes.** `text-[11px]` is how a scale of four becomes a scale of
-  nine. Use the scale; if the scale is wrong, change the scale.
+- **Six on a marketing page.** A hero legitimately needs display sizes the
+  shell never does. A different budget, not an exemption.
+- **No bespoke sizes on either.** `text-[11px]` is how a scale of four becomes
+  a scale of nine, and `text-[7px]` is not a size, it is a mistake. Use the
+  scale; if the scale is wrong, change the scale.
 - Reuse a size across roles rather than inventing one for each role.
 
 ### Spacing
@@ -258,11 +271,19 @@ The first three are the test; run it. The rest need eyes.
 ### Standing debt
 
 The budgets in the test are ratchets set at what each page does today, not at
-the target. Off-grid spacing is the real debt — several dozen `.5` steps
-across the shell. They are not rounded in bulk because that is a visual change
-needing an eye rather than a script. Lower a budget when you have removed
-something; raising one is a decision to argue for, not a way to make a build
-pass.
+the target. Lower one when you have removed something; raising one is a
+decision to argue for, not a way to make a build pass.
+
+Two known debts:
+
+- **Off-grid spacing across the shell** — several dozen `.5` steps. Not
+  rounded in bulk because that is a visual change needing an eye rather than
+  a script.
+- **The `supremely` theme.** Eight font sizes and seventy-odd off-grid values
+  on the front page, including `text-[7px]` in the hero illustration. It is
+  the default front page and the worst offender, which is the wrong way round
+  for the theme people copy. Cleaning it is its own piece of work; the ratchet
+  stops it getting worse in the meantime.
 
 ---
 
