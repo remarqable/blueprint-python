@@ -1,4 +1,4 @@
-.PHONY: help install upgrade css css-watch assets migrate run test test-postgres clean deploy provision
+.PHONY: help install upgrade css css-watch assets migrate run test test-postgres clean deploy provision skills
 
 TAILWIND_VERSION := v4.1.14
 TAILWIND_BIN := bin/tailwindcss
@@ -18,6 +18,7 @@ help:
 	@echo "  run        Build CSS, apply migrations, run the application"
 	@echo "  test       Run tests (SQLite in-memory)"
 	@echo "  test-postgres  Run tests against PostgreSQL"
+	@echo "  skills     Link blueprint skills into .claude/skills"
 	@echo "  clean      Remove .venv and cache files"
 	@echo "  deploy     Deploy the application"
 	@echo "  provision  Show server provisioning instructions"
@@ -73,6 +74,32 @@ clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+
+skills:
+	@set -e; \
+	if [ -d skills ]; then BP=.; \
+	else BP=$$(git config -f .gitmodules --get-regexp '\.path$$' 2>/dev/null \
+	     | awk '{print $$2}' \
+	     | while read -r p; do if [ -d "$$p/skills" ]; then echo "$$p"; break; fi; done); \
+	fi; \
+	if [ -z "$$BP" ] || [ ! -d "$$BP/skills" ]; then \
+	  echo "No blueprint skills found."; \
+	  echo "The blueprint submodule is missing or not initialized. Run:"; \
+	  echo "  git submodule update --init --recursive"; \
+	  exit 1; \
+	fi; \
+	mkdir -p .claude/skills; \
+	for d in "$$BP"/skills/*/; do \
+	  [ -f "$$d/SKILL.md" ] || continue; \
+	  n=$$(basename "$$d"); \
+	  rm -rf ".claude/skills/$$n"; \
+	  ln -s "$$(cd "$$d" && pwd)" ".claude/skills/$$n"; \
+	  echo "  linked /$$n"; \
+	done; \
+	if [ -f .gitignore ] && ! grep -qxF '.claude/skills/' .gitignore; then \
+	  echo '.claude/skills/' >> .gitignore; \
+	fi; \
+	echo "Skills linked. Restart Claude Code to pick them up."
 
 deploy:
 	./scripts/deploy.sh

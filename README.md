@@ -44,9 +44,30 @@ blueprint-python/
 │   ├── tenancy.md                 # layer: tenancy: shared
 │   ├── plugins.md                 # layer: plugins: true
 │   └── theming.md                 # layer: theming: true
+├── skills/                        # procedures to run, not patterns to read
+│   └── blueprint-audit/           # the mandatory conformance gate
 ├── scripts/                       # deploy.sh, provision-server.sh
 └── Makefile
 ```
+
+## Verification
+
+Patterns that are only read get followed loosely. Every implementation against
+this blueprint ends with the **blueprint audit** — a separate reviewer agent,
+over the changed files, that never sees the goal or the plan, because the agent
+that wrote the code can justify every shortcut it took. It reports violations and
+a scored conformance table, and Critical or High findings block the commit.
+
+The agent runs it by reading `blueprint/skills/blueprint-audit/SKILL.md`, so the
+gate needs nothing installed and holds in a fresh clone. To invoke the same audit
+yourself as a slash command:
+
+```bash
+make skills        # symlink skills/* into .claude/skills/
+# then: /blueprint-audit
+```
+
+See [skills/README.md](skills/README.md).
 
 ## Configuration
 

@@ -11,7 +11,7 @@ This blueprint describes **one architecture with optional layers** — never two
 alternatives to blend. Reading a layer that does not apply to the project
 produces code that does not run.
 
-1. Establish the [Project Configuration](#project-configuration) below.
+1. Establish the [Project Configuration](#-project-configuration) below.
 2. Read **all of `patterns/core/`** — it applies to every project.
 3. Read a **layer doc only if its condition is met.**
 
@@ -32,12 +32,20 @@ docs: `auth` picks one strategy inside `patterns/core/auth.md`, and `deploy`
 picks one shape inside `patterns/core/deployment.md`. The same rule applies —
 implement the chosen branch, do not blend.
 
+`skills/` is not a layer and has no condition. It holds procedures rather than
+patterns, and [`skills/blueprint-audit`](skills/blueprint-audit/SKILL.md) runs
+on every project — see [Verification](#-verification-every-change-is-audited).
+
 ---
 
 ## 📋 Project Configuration
 
-> **AI Agents:** Ask the questions below before creating any files, then record
-> the answers here. This block is authoritative for everything that follows.
+> **AI Agents:** Ask the questions below before creating any files. Record the
+> answers in the **project's** root `CLAUDE.md` — the block below holds upstream
+> defaults, and this file is a shared submodule, so editing it here changes every
+> project that mounts the blueprint. The project's recorded answers are
+> authoritative for everything that follows, and are what the
+> [blueprint audit](#-verification-every-change-is-audited) reviews against.
 
 ```yaml
 tenancy: shared        # shared | personal
@@ -207,6 +215,14 @@ make run       # runs `flask db upgrade`, then the dev server on :8000
 
 ✅ **Verify:** `curl localhost:8000/health` returns `{"status": "ok"}`
 
+### Step 8: Audit
+
+Run the [blueprint audit](#-verification-every-change-is-audited) over everything
+you just generated. Serving `/health` proves the app boots; the audit proves it
+conforms. Both are required before the project is handed over.
+
+Optionally, `make skills` also exposes it as `/blueprint-audit` for humans.
+
 ---
 
 ## Philosophy
@@ -252,6 +268,9 @@ yourapp/
 │   ├── lang/                 # en.json, es.json
 │   ├── middleware/           # auth, csrf, ratelimit
 │   └── platform/             # logger, i18n, errors, tenant, plugins, theming
+├── blueprint/                # THIS repo, as a submodule
+│   ├── patterns/             # what correct code looks like
+│   └── skills/               # procedures to run — blueprint-audit lives here
 ├── plugins/                  # plugins: true only
 ├── migrations/versions/
 ├── tests/
@@ -526,20 +545,73 @@ class ForbiddenError(AppError):
 | [storage.md](patterns/storage.md) | `uploads: true` | File uploads, image variants, safe serving |
 | [jobs.md](patterns/jobs.md) | `jobs: true` | DB-backed queue, worker process, retries |
 
+### Skills — procedures to run, not patterns to read
+
+| Skill | Purpose | When |
+|-------|---------|------|
+| [blueprint-audit](skills/blueprint-audit/SKILL.md) | Independent adversarial review of the changed files, with a scored conformance table | **Mandatory** after every implementation, before reporting the work complete |
+
+See [skills/README.md](skills/README.md) for how to add one.
+
+---
+
+## ✅ Verification: every change is audited
+
+**All code generated against this blueprint must conform to it, and conformance
+is checked rather than assumed.** After implementing anything — a new project, a
+feature, a bug fix, a refactor — and **before reporting the work complete**, run
+[`skills/blueprint-audit`](skills/blueprint-audit/SKILL.md).
+
+Reading the patterns is not the same as following them, and the agent that
+drifted is the one being asked whether it drifted. So the audit is run by a
+separate reviewer agent that never sees the goal or the plan. The skill holds the
+procedure and the reasoning; this section is only the requirement.
+
+Read `blueprint/skills/blueprint-audit/SKILL.md` and follow it — no install, so
+the gate holds in a fresh clone. (`make skills` also exposes it as
+`/blueprint-audit` for humans; the agent never needs it.)
+
+| Result | What to do |
+|--------|-----------|
+| **FAIL** | Fix the Critical and High violations, re-run the audit. Do not commit, do not report the work complete. |
+| **WARN** | Report complete **with the violations table**, naming the ones you left. |
+| **PASS** | Report complete, include the conformance table. |
+
+Print what the reviewer returned rather than your summary of it. A finding you
+chose not to fix is a decision when the user can see it and a regression when you
+quietly drop it.
+
+The reviewer is told which layers are enabled and is forbidden to open the rest.
+It takes that list from the **project's** root `CLAUDE.md`, not from the [Project
+Configuration](#-project-configuration) block above — this file is a shared
+submodule, so that block holds upstream defaults. Record the real answers there
+and the audit does not have to infer them.
+
 ---
 
 ## 🤖 AI Agent Instructions
 
 **Bootstrapping a new project:**
 1. Ask the [configuration questions](#the-questions-to-ask). Do not guess.
-2. Record answers in [Project Configuration](#project-configuration).
+2. Record the answers in the **project's own** root `CLAUDE.md`, not in this
+   submodule — this file is shared, and editing it changes every project.
 3. Read all of `patterns/core/`. Read layer docs **only** where the condition holds.
 4. Execute Quick Start steps 1–7 in order.
 5. Verify `make run` serves `/health`.
+6. Run the [blueprint audit](#-verification-every-change-is-audited) over
+   everything you generated — by reading its `SKILL.md`, which needs no install.
+   Fix any FAIL before handing the project over.
 
-**Adding a feature:** find the relevant pattern doc via the index above and
-follow it. Do not invent a second way to do something the blueprint already
-covers.
+**Adding a feature:**
+1. Find the relevant pattern doc via the index above and follow it. Do not invent
+   a second way to do something the blueprint already covers.
+2. Implement.
+3. Run the [blueprint audit](#-verification-every-change-is-audited) over the
+   files you changed, and act on the result, **before** reporting the work
+   complete.
+
+Step 3 is not conditional on the size of the change. The violations this catches
+are overwhelmingly small changes.
 
 **Non-negotiables:**
 - `BigIntPK` for primary keys — a plain `BigInteger` PK breaks every INSERT on SQLite.
@@ -556,6 +628,10 @@ covers.
 - Every interactive component carries its own ARIA; Tailwind ships none.
 - With `plugins: true`, plugin templates use `plugin_url_for`, never `url_for`,
   and no two plugin versions are ever registered on the same URL prefix.
+- **Every implementation ends with the
+  [blueprint audit](#-verification-every-change-is-audited)**, run by a separate
+  agent, before the work is reported complete. A feature is not done when it
+  runs — it is done when it runs and conforms.
 
 ---
 
