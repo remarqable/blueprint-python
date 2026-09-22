@@ -77,25 +77,25 @@ clean:
 
 skills:
 	@set -e; \
-	if [ -d skills ]; then BP=.; \
-	else BP=$$(git config -f .gitmodules --get-regexp '\.path$$' 2>/dev/null \
-	     | awk '{print $$2}' \
-	     | while read -r p; do if [ -d "$$p/skills" ]; then echo "$$p"; break; fi; done); \
-	fi; \
-	if [ -z "$$BP" ] || [ ! -d "$$BP/skills" ]; then \
+	found=0; \
+	for BP in . $$(git config -f .gitmodules --get-regexp '\.path$$' 2>/dev/null | awk '{print $$2}'); do \
+	  [ -d "$$BP/skills" ] || continue; \
+	  mkdir -p .claude/skills; \
+	  for d in "$$BP"/skills/*/; do \
+	    [ -f "$$d/SKILL.md" ] || continue; \
+	    n=$$(basename "$$d"); \
+	    rm -rf ".claude/skills/$$n"; \
+	    ln -s "$$(cd "$$d" && pwd)" ".claude/skills/$$n"; \
+	    echo "  linked /$$n"; \
+	    found=1; \
+	  done; \
+	done; \
+	if [ "$$found" = "0" ]; then \
 	  echo "No blueprint skills found."; \
 	  echo "The blueprint submodule is missing or not initialized. Run:"; \
 	  echo "  git submodule update --init --recursive"; \
 	  exit 1; \
 	fi; \
-	mkdir -p .claude/skills; \
-	for d in "$$BP"/skills/*/; do \
-	  [ -f "$$d/SKILL.md" ] || continue; \
-	  n=$$(basename "$$d"); \
-	  rm -rf ".claude/skills/$$n"; \
-	  ln -s "$$(cd "$$d" && pwd)" ".claude/skills/$$n"; \
-	  echo "  linked /$$n"; \
-	done; \
 	if [ -f .gitignore ] && ! grep -qxF '.claude/skills/' .gitignore; then \
 	  echo '.claude/skills/' >> .gitignore; \
 	fi; \
