@@ -16,6 +16,7 @@
 - [Deploy Script](#deploy-script)
 - [Docker Distribution](#docker-distribution)
 - [Health Check](#health-check)
+- [Request Profiling (System Info)](#request-profiling-system-info)
 - [Production Checklist](#production-checklist)
 
 ---
@@ -283,6 +284,55 @@ Caddy automatically:
 - Redirects HTTP to HTTPS
 - Enables HTTP/2
 
+#### "Be right back" page
+
+Every deploy restarts Gunicorn, and for those few seconds (or while the app is
+down) Caddy would answer `502 Bad Gateway`. Serve a friendly page instead:
+Caddy's `handle_errors` catches the proxy's 502/503/504 and returns a static
+file that doesn't need the app at all.
+
+```
+# /etc/caddy/Caddyfile
+(be_right_back) {
+    handle_errors 502 503 504 {
+        header Cache-Control "no-store"
+        root * /etc/caddy
+        rewrite * /maintenance.html
+        file_server
+    }
+}
+
+yourapp.com {
+    reverse_proxy localhost:8000
+    import be_right_back
+}
+```
+
+`deploy/maintenance.html` (in the repo, so it's reviewed and versioned like
+everything else) is **self-contained**: inline CSS, no app routes, no static
+files, since none of those answer while the app is down. It says what's
+happening ("We'll be right back", a coffee mug, a spinner) in the product's
+colours, carries `<meta name="robots" content="noindex">`, and **comes back by
+itself** by polling the health endpoint:
+
+```html
+<script>
+  (function check() {
+    fetch('/health', { cache: 'no-store' }).then(function (r) {
+      if (r.ok) location.reload(); else setTimeout(check, 3000);
+    }).catch(function () { setTimeout(check, 3000); });
+  })();
+</script>
+```
+
+The inline script is fine here: Caddy serves this file, so the app's
+Content-Security-Policy doesn't apply to it. The deploy script installs it
+(`install -m 644 deploy/maintenance.html /etc/caddy/maintenance.html`) so a
+change ships with the next deploy; the Caddyfile itself changes rarely
+(validate with `caddy validate`, then `systemctl reload caddy`). Test it once
+by stopping the service: any page should show it with status 502, and reload
+as soon as the service is back.
+
 ### 4. File Permissions
 
 ```bash
@@ -354,6 +404,9 @@ ssh $REMOTE "cd $REMOTE_DIR && git rev-parse --short HEAD > .git_sha"
 # Install dependencies (exactly what uv.lock pins, no dev tools)
 ssh $REMOTE "cd $REMOTE_DIR && uv sync --locked --no-dev -q"
 echo -e "${CHECK} Dependencies updated"
+
+# The "be right back" page Caddy shows while the service restarts
+ssh $REMOTE "install -m 644 $REMOTE_DIR/deploy/maintenance.html /etc/caddy/maintenance.html"
 
 # Restart service
 ssh $REMOTE "systemctl restart $SERVICE"
@@ -571,6 +624,104 @@ def api_health():
 
 ---
 
+## Request Profiling (System Info)
+
+"The admin is slow" is a guess until a page says how slow and why. Measure
+every request, show admins the numbers in a small **Info** box, and make the
+link turn red when a page is slow, so a slow page gets caught while it's
+happening.
+
+### What is measured
+
+```python
+# app/platform/profiling.py -- register_profiling(app), called from create_app
+import time, uuid
+from flask import g, request
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+
+_hooked = False
+
+def register_profiling(app):
+    global _hooked
+    if not _hooked:                          # engine events are process-wide: hook once
+        _hooked = True
+
+        @event.listens_for(Engine, 'before_cursor_execute')
+        def _before(conn, cursor, statement, parameters, context, executemany):
+            conn.info.setdefault('query_start', []).append(time.monotonic())
+
+        @event.listens_for(Engine, 'after_cursor_execute')
+        def _after(conn, cursor, statement, parameters, context, executemany):
+            started = conn.info.get('query_start') or []
+            if not started:
+                return
+            took = time.monotonic() - started.pop()
+            try:
+                g.db_queries = getattr(g, 'db_queries', 0) + 1
+                g.db_time = getattr(g, 'db_time', 0.0) + took
+            except RuntimeError:             # outside a request (jobs, CLI)
+                pass
+
+    @app.before_request
+    def _start():
+        g.request_start = time.monotonic()
+        g.request_id = request.headers.get('X-Request-Id') or str(uuid.uuid4())
+        g.db_queries, g.db_time = 0, 0.0
+```
+
+- **Request ID** on every response (`X-Request-Id`), and in the box, so a slow
+  page can be found in the logs.
+- **Server-Timing** (`app;dur=…, db;dur=…;desc="N queries"`) shows in the
+  browser's network tab. **Send it to admins only**: query counts and timings
+  are no business of the public.
+- A context processor gives templates `system_info` **for platform admins
+  only** (`None` for everyone else): user, request ID, server time so far, DB
+  queries and time, server host name, worker PID, deployed version and time
+  (the `.git_sha` the deploy writes, and its mtime), browser.
+
+### The Info link
+
+In the admin layout's footer: `yourapp <sha> (<deployed>) · Info · 0.31s`.
+**Info** opens a dialog with the table above plus the **page load** measured in
+the browser (Navigation Timing: `loadEventEnd - startTime`). The link **turns
+red when the page took over a second**, in the browser or on the server. The
+script is a static file (`static/js/sysinfo.js`), not inline: the CSP forbids
+inline scripts (see [Security](security.md#content-security-policy)).
+
+```javascript
+window.addEventListener('load', function () {
+  setTimeout(function () {
+    var nav = performance.getEntriesByType('navigation')[0];
+    if (!nav) return;
+    var ms = Math.round(nav.loadEventEnd - nav.startTime);
+    document.querySelectorAll('[data-page-load]').forEach(function (el) {
+      el.textContent = (ms / 1000).toFixed(2) + 's'; });
+    var link = document.getElementById('system-info-link');
+    var server = link ? parseInt(link.dataset.renderMs || '0', 10) : 0;
+    if (link && (ms > 1000 || server > 1000)) link.classList.add('text-red-700');
+  }, 0);
+});
+```
+
+### Using it
+
+Time each admin page twice in one process (the first run pays template
+compilation and cold caches) and look at queries and DB time against total
+time. The usual culprits it finds:
+
+- **One query per row** (N+1): a list fetching each row's children one by one.
+  Fetch them for the whole page in one `IN (...)` query.
+- **Loading rows to count them**: `len(query.all())`. Use `count()` in SQL.
+- **Work for something folded away**: a collapsed section computed on every
+  visit. Load it when it's opened (`hx-trigger="toggle once"`).
+- **A lookup repeated per row** (scanning a table for each row). Build the map
+  once per request (`g`) or once per process (`lru_cache`) for data that
+  doesn't change.
+- **Lists without paging**: page in the query (`offset`/`limit`), never after.
+
+---
+
 ## Production Checklist
 
 ### Security
@@ -591,6 +742,8 @@ def api_health():
 
 - [ ] Gunicorn with multiple workers (`-w 4`)
 - [ ] Health check endpoint working
+- [ ] "Be right back" page installed (Caddy `handle_errors`), tested by stopping the service
+- [ ] Request profiling on: admin Info link, Server-Timing for admins only
 - [ ] Structured logging enabled
 - [ ] Error tracking configured (optional: Sentry)
 

@@ -355,6 +355,12 @@ and `script-src 'self'` blocking outside scripts — are both still in force.
 Keep `object-src 'none'`, `base-uri 'self'`, and `frame-ancestors 'none'` — they
 cost nothing and close real attacks.
 
+`script-src 'self'` also means **no inline `<script>` blocks** in app templates.
+A page that needs a few lines of JavaScript (the admin's page-load timer in
+[deployment.md](deployment.md#request-profiling-system-info)) gets a small file
+in `static/js/`. The exception is a page the app doesn't serve: Caddy's "be
+right back" page is outside the app's CSP, so its inline script is fine.
+
 > Handling raw card numbers or health records, or answering a security
 > questionnaire that names `unsafe-eval`? There is a stricter Alpine build that
 > avoids it, at the cost of rewriting every component in JavaScript. Switch
@@ -418,6 +424,12 @@ def add_security_headers(response):
 
     return response
 ```
+
+Diagnostic headers are not security headers, and they leak: `Server-Timing`
+(server and database time, query counts) shows anyone how the app is built and
+where it's slow. Send it **only to platform admins**, as the request profiling in
+[deployment.md](deployment.md#request-profiling-system-info) does; an
+`X-Request-Id` is harmless and helps support, so every response can carry it.
 
 ---
 
