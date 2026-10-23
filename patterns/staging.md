@@ -97,6 +97,11 @@ sudo -u yourapp cp /opt/yourapp/.env .env      # then edit: see Settings
 chmod 600 .env
 ```
 
+**Never move or rename a checkout.** `.venv` records its own path in every
+script it installs (`.venv/bin/flask` starts with `#!/opt/yourapp-staging/.venv/bin/python`),
+so after `mv` the service fails with `203/EXEC: No such file or directory`. To
+rename one, move it and rebuild the environment: `rm -rf .venv && uv sync --locked --no-dev`.
+
 ---
 
 ## Settings
@@ -232,6 +237,17 @@ WantedBy=multi-user.target
 - **With `jobs: true`**, a `yourapp-staging-worker.service` runs
   `flask jobs run` from the staging checkout, against the staging database.
   Keep its concurrency low; it shares the CPU with production's workers.
+
+
+**Restart workers by their unit files, not a glob.** `systemctl restart
+'yourapp-staging-worker-*'` matches only units systemd has loaded, so a worker
+that has never run (just added, or just renamed) is silently skipped. List the
+enabled ones instead:
+
+```bash
+units=$(systemctl list-unit-files --no-legend 'yourapp-staging-worker-*' | awk '$2 == "enabled" {print $1}')
+systemctl restart $units
+```
 
 ---
 
