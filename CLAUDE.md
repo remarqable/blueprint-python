@@ -198,6 +198,7 @@ EOF
 | `app/platform/logger.py` | [§ Logging](#logging) |
 | `app/platform/errors.py` | [§ Error Handling](#error-handling) |
 | `app/platform/i18n.py` | [core/i18n.md](patterns/core/i18n.md) |
+| `app/platform/assets.py` | [core/performance.md](patterns/core/performance.md#static-files) |
 | `app/platform/tenant.py` | [tenancy.md](patterns/tenancy.md) — only if `tenancy: shared` |
 
 ### Step 6: First model, controller, view
@@ -420,6 +421,10 @@ def create_app(config_class=Config):
     from .middleware.csrf import init_csrf
     init_csrf(app)
 
+    # Versioned static URLs, cached a year (core/performance.md)
+    from .platform.assets import register_assets
+    register_assets(app)
+
     # tenancy: shared only -- resolves g.org and installs the tenant filter
     from .platform.tenant import init_tenant
     init_tenant(app)
@@ -534,6 +539,7 @@ class ForbiddenError(AppError):
 | [core/typing.md](patterns/core/typing.md) | Type hints and mypy |
 | [core/audit.md](patterns/core/audit.md) | `created_by` / `updated_by` |
 | [core/deployment.md](patterns/core/deployment.md) | systemd + Gunicorn + Caddy, the "be right back" page, request profiling (admin Info box) |
+| [core/performance.md](patterns/core/performance.md) | N+1 is a bug, query-count tests, eager-loading defaults, static file caching |
 
 ### Layers — read only when the condition holds
 

@@ -86,9 +86,9 @@ diff` that may also sweep in unrelated working-tree edits.
 
 | File pattern | Brings in |
 |---|---|
-| `app/models/*.py` | MVC, database, typing, tenancy |
-| `app/controllers/*.py` | MVC, auth, security, typing |
-| `app/views/**/*.html` | Frontend, HTMX, i18n, CSRF |
+| `app/models/*.py` | MVC, database (incl. N+1), typing, tenancy |
+| `app/controllers/*.py` | MVC, auth, security, database (N+1), typing |
+| `app/views/**/*.html` | Frontend, HTMX, i18n, CSRF, database (relationships touched in loops) |
 | `app/platform/**` | Whichever layer that subsystem implements |
 | `app/static/css/**` | Frontend — and check `app.css` was rebuilt |
 | `plugins/**` | Plugins layer |
@@ -112,7 +112,7 @@ more than one language blueprint. Everything below is relative to that path:
 - Master doc: `<blueprint>/CLAUDE.md`
 - Always-applicable patterns: `<blueprint>/patterns/core/` — `audit`, `auth`,
   `database`, `deployment`, `frontend`, `htmx`, `i18n`, `mobile-navigation`,
-  `mvc`, `portability`, `security`, `testing`, `typing`
+  `mvc`, `performance`, `portability`, `security`, `testing`, `typing`
 - Layer docs: `<blueprint>/patterns/` — `jobs.md`, `plugins.md`, `storage.md`,
   `theming.md`, `tenancy.md`
 
@@ -193,9 +193,9 @@ Active project configuration:
    review against the branch this project did not choose.
 
 Which core docs the changes pull in:
-   Models      -> core/mvc.md, core/database.md, core/typing.md
-   Controllers -> core/mvc.md, core/auth.md, core/security.md
-   Templates   -> core/frontend.md, core/htmx.md, core/i18n.md
+   Models      -> core/mvc.md, core/database.md, core/performance.md, core/typing.md
+   Controllers -> core/mvc.md, core/auth.md, core/security.md, core/performance.md
+   Templates   -> core/frontend.md, core/htmx.md, core/i18n.md, core/performance.md
    Migrations  -> core/database.md
    Tests       -> core/testing.md
    Anything that touches paths, config, or the data dir -> core/portability.md
@@ -230,6 +230,11 @@ DO:
 - Check that any template change is reflected in a rebuilt app/static/css/app.css
 - Check templates use logical properties (ms-/me-/ps-/pe-/text-start), never
   ml-/mr-/text-left, and that interactive components carry their own ARIA
+- Check every changed list (controller, model method, template loop, job that
+  iterates rows) against core/performance.md: no query, model lookup or lazy
+  relationship per row; counts and groups in SQL; no collection relationship
+  that defaults to eager. A query per row is High (Major when scoring); a
+  collection relationship that defaults to eager is Medium
 - Check type hints against core/typing.md
 - Check auth decorators against core/auth.md
 - Check for SQL injection and hardcoded secrets
@@ -283,8 +288,8 @@ The reviewer fills the conformance table using this scale, per pattern category:
 
 **Major** — business logic in a controller, missing CSRF token, SQL injection,
 missing auth decorator on a protected route, an unscoped query on a
-tenant-scoped table, a schema change with no migration, a violated
-non-negotiable.
+tenant-scoped table, a schema change with no migration, a query per row on a
+page or job that lists rows (N+1), a violated non-negotiable.
 
 **Minor** — missing type hints, an unwrapped user-facing string, missing
 docstring, naming drift.
@@ -294,8 +299,9 @@ rows into the overall.
 
 Strictness by category:
 
-- **Strict** — MVC separation, database patterns, tenancy scoping, security
-  (CSRF, injection, auth), portability. These are correctness and safety, and on
+- **Strict** — MVC separation, database patterns (including N+1, per
+  core/performance.md), tenancy scoping, security (CSRF, injection, auth),
+  portability. These are correctness and safety, and on
   a self-hostable product portability is a user-facing promise.
 - **Moderate** — typing, HTMX usage. Flag them; do not fail the review over one
   missing annotation.

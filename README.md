@@ -40,6 +40,7 @@ blueprint-python/
 │   │   ├── security.md            # CSRF, rate limiting, checklist
 │   │   ├── i18n.md   htmx.md   frontend.md   mobile-navigation.md
 │   │   ├── testing.md   typing.md   audit.md
+│   │   ├── performance.md         # N+1, query counts, static caching
 │   │   └── deployment.md          # systemd + Gunicorn + Caddy
 │   ├── tenancy.md                 # layer: tenancy: shared
 │   ├── plugins.md                 # layer: plugins: true

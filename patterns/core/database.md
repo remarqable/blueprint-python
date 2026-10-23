@@ -296,9 +296,12 @@ total_pages = pagination.pages
 
 ### Joins and Eager Loading
 
+A query per row is a bug; [performance.md](performance.md) has the rule, the
+test that catches it, and the fixes.
+
 ```python
-# Eager loading (avoid N+1)
-users = User.query.options(db.joinedload(User.settings)).all()
+# Eager loading (avoid N+1): selectinload for a collection, joinedload for a many-to-one
+users = User.query.options(db.selectinload(User.settings)).all()
 
 # Filter by relationship
 users = User.query.join(Setting).filter(Setting.key == 'theme').all()
@@ -416,6 +419,8 @@ def upgrade():
 
 ## Performance
 
+Query counts, eager-loading defaults and caching: [performance.md](performance.md).
+
 ### Indexes
 
 ```python
@@ -434,8 +439,8 @@ __table_args__ = (
 # Select specific columns only
 users = User.query.options(db.load_only(User.id, User.email)).all()
 
-# Batch inserts
-db.session.bulk_insert_mappings(User, [
+# Batch inserts: one statement (skips validate() and ORM hooks; see performance.md)
+db.session.execute(sa.insert(User), [
     {'email': 'user1@example.com', 'name': 'User 1'},
     {'email': 'user2@example.com', 'name': 'User 2'},
 ])

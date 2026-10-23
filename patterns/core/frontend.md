@@ -342,7 +342,7 @@ Alpine supplies the behavior Bootstrap's JS bundle used to: toggles, dropdowns,
 modals, dismissible alerts. About 15KB, no build step, declarative in the markup.
 
 ```html
-<script defer src="/static/js/alpine.min.js"></script>
+<script defer src="{{ url_for('static', filename='js/alpine.min.js') }}"></script>
 ```
 
 `defer` is required — Alpine initializes on `DOMContentLoaded` and will miss the
@@ -690,8 +690,8 @@ owning that too. This is the real cost of the migration; budget for it.
 the Focus plugin and use `x-trap`:
 
 ```html
-<script defer src="/static/js/alpine-focus.min.js"></script>
-<script defer src="/static/js/alpine.min.js"></script>
+<script defer src="{{ url_for('static', filename='js/alpine-focus.min.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/alpine.min.js') }}"></script>
 
 <div role="dialog" aria-modal="true" x-trap.noscroll="open">…</div>
 ```

@@ -270,6 +270,7 @@ sudo apt install caddy
 ```
 # /etc/caddy/Caddyfile
 yourapp.com {
+    encode zstd gzip
     reverse_proxy localhost:8000
 }
 ```
@@ -303,6 +304,7 @@ file that doesn't need the app at all.
 }
 
 yourapp.com {
+    encode zstd gzip
     reverse_proxy localhost:8000
     import be_right_back
 }
@@ -708,17 +710,16 @@ window.addEventListener('load', function () {
 
 Time each admin page twice in one process (the first run pays template
 compilation and cold caches) and look at queries and DB time against total
-time. The usual culprits it finds:
+time. What the numbers say:
 
-- **One query per row** (N+1): a list fetching each row's children one by one.
-  Fetch them for the whole page in one `IN (...)` query.
-- **Loading rows to count them**: `len(query.all())`. Use `count()` in SQL.
-- **Work for something folded away**: a collapsed section computed on every
-  visit. Load it when it's opened (`hx-trigger="toggle once"`).
-- **A lookup repeated per row** (scanning a table for each row). Build the map
-  once per request (`g`) or once per process (`lru_cache`) for data that
-  doesn't change.
-- **Lists without paging**: page in the query (`offset`/`limit`), never after.
+- **Queries near the number of rows shown**: a query per row (N+1).
+- **Few queries, DB time high**: one slow query, usually a missing index.
+- **DB time small against total**: the time is in Python (a slow helper, a
+  lookup repeated per row, a collapsed section computed on every visit; load
+  that when it's opened, `hx-trigger="toggle once"`).
+
+The fixes, and the test that keeps an N+1 from coming back:
+[performance.md](performance.md).
 
 ---
 
@@ -744,13 +745,14 @@ time. The usual culprits it finds:
 - [ ] Health check endpoint working
 - [ ] "Be right back" page installed (Caddy `handle_errors`), tested by stopping the service
 - [ ] Request profiling on: admin Info link, Server-Timing for admins only
+- [ ] Static URLs versioned and cached a year ([performance.md](performance.md#static-files))
 - [ ] Structured logging enabled
 - [ ] Error tracking configured (optional: Sentry)
 
 ### Infrastructure
 
 - [ ] systemd service enabled and running
-- [ ] Caddy configured with domain
+- [ ] Caddy configured with domain, `encode zstd gzip` on
 - [ ] SSL certificate active
 - [ ] Firewall configured (only 80, 443, 22)
 - [ ] Log rotation configured
