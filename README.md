@@ -44,7 +44,9 @@ blueprint-python/
 │   │   └── deployment.md          # systemd + Gunicorn + Caddy
 │   ├── tenancy.md                 # layer: tenancy: shared
 │   ├── plugins.md                 # layer: plugins: true
-│   └── theming.md                 # layer: theming: true
+│   ├── theming.md                 # layer: theming: true
+│   ├── storage.md   jobs.md       # layers: uploads: true, jobs: true
+│   └── staging.md                 # layer: staging: true
 ├── skills/                        # procedures to run, not patterns to read
 │   └── blueprint-audit/           # the mandatory conformance gate
 ├── scripts/                       # deploy.sh, provision-server.sh

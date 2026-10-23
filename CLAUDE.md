@@ -26,6 +26,7 @@ reference, not for context.
 | `patterns/theming.md` | `theming: true` |
 | `patterns/storage.md` | `uploads: true` |
 | `patterns/jobs.md` | `jobs: true` |
+| `patterns/staging.md` | `staging: true` (requires `deploy: vps`) |
 
 Two further decisions select *sections within* core docs rather than layer
 docs: `auth` picks one strategy inside `patterns/core/auth.md`, and `deploy`
@@ -57,6 +58,7 @@ auth: magic_links      # magic_links | password
 uploads: false         # true | false
 jobs: false            # true | false
 deploy: vps            # vps | docker
+staging: false         # true | false  (deploy: vps only)
 ```
 
 ### The questions to ask
@@ -103,6 +105,14 @@ worker process.
 **9. Who runs this in production?** → `deploy`. `vps` (default) when you
 operate the server; `docker` when the application is distributed for others
 to run.
+
+**10. Should changes be tried on the server before they reach users?** →
+`staging`. `true` adds a second copy of the app on the same VPS at
+`staging.<domain>`: its own checkout, process, port, database and settings,
+routed by Caddy on the subdomain, open to admins only. Branches are deployed
+there and tried, on a copy of production's data when needed, before `main`
+goes to production. See [staging.md](patterns/staging.md). Requires
+`deploy: vps`.
 
 ---
 
@@ -550,6 +560,7 @@ class ForbiddenError(AppError):
 | [theming.md](patterns/theming.md) | `theming: true` | Per-tenant branding and template overrides |
 | [storage.md](patterns/storage.md) | `uploads: true` | File uploads, image variants, safe serving |
 | [jobs.md](patterns/jobs.md) | `jobs: true` | DB-backed queue, worker process, retries |
+| [staging.md](patterns/staging.md) | `staging: true` | Second copy on the same VPS, subdomain routing, refresh from production |
 
 ### Skills — procedures to run, not patterns to read
 

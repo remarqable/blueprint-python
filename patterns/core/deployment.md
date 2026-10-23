@@ -33,6 +33,9 @@ configuration:
   init system, or Python; a container is the distribution artifact. See
   [Docker Distribution](#docker-distribution).
 
+With `staging: true`, a second copy of the app runs on the same server at
+`staging.<domain>`: see [staging.md](../staging.md).
+
 **VPS stack:**
 - **Server**: Digital Ocean Droplet (or any VPS)
 - **Process Manager**: systemd

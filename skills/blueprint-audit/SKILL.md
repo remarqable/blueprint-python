@@ -46,7 +46,7 @@ rule, and the reviewer must obey it too:
 
 - `patterns/core/` applies to every project. Always in scope.
 - A layer doc (`tenancy.md`, `plugins.md`, `theming.md`, `storage.md`,
-  `jobs.md`) is in scope **only** if that layer is enabled.
+  `jobs.md`, `staging.md`) is in scope **only** if that layer is enabled.
 - Two decisions select a section *within* a core doc rather than a layer doc:
   `auth` picks one strategy inside `patterns/core/auth.md`, and `deploy` picks
   one shape inside `patterns/core/deployment.md`. Review against the chosen
@@ -113,8 +113,8 @@ more than one language blueprint. Everything below is relative to that path:
 - Always-applicable patterns: `<blueprint>/patterns/core/` — `audit`, `auth`,
   `database`, `deployment`, `frontend`, `htmx`, `i18n`, `mobile-navigation`,
   `mvc`, `performance`, `portability`, `security`, `testing`, `typing`
-- Layer docs: `<blueprint>/patterns/` — `jobs.md`, `plugins.md`, `storage.md`,
-  `theming.md`, `tenancy.md`
+- Layer docs: `<blueprint>/patterns/` — `jobs.md`, `plugins.md`, `staging.md`,
+  `storage.md`, `theming.md`, `tenancy.md`
 
 If the directory is empty, the submodule is not initialized. Stop and tell the
 user to run `git submodule update --init --recursive` — do not review against
@@ -186,6 +186,7 @@ Active project configuration:
      theming.md  -> only if theming: true
      storage.md  -> only if uploads: true
      jobs.md     -> only if jobs: true
+     staging.md  -> only if staging: true
    If a layer is disabled, do not open its doc at all — not for reference,
    not for context.
 3. For auth and deployment, read only the branch the configuration selects
