@@ -688,7 +688,27 @@ def register_profiling(app):
 
 ### The Info link
 
-In the admin layout's footer: `yourapp <sha> (<deployed>) · Info · 0.31s`.
+A small badge, `<sha> (<deployed>) · Info · 0.31s`, **in the same place on every
+page**, public and admin: fixed to the bottom-left corner of the screen, included
+once at the end of `base.html`'s `<body>` for platform admins. One spot means an
+admin never hunts for it (a footer is off screen beside a map, a sidebar exists
+on admin pages only). Keep it above any bar fixed to the bottom on small screens
+(a mobile "Book" bar), and give it no `backdrop-filter` or `transform`: either
+makes it the containing block of the fixed dialog inside it, and the dialog
+opens trapped in the badge.
+
+```html
+{% if system_info %}
+<div x-data="{ open: false }"
+     class="fixed start-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] lg:bottom-3 z-40
+            rounded-full bg-white/95 px-3 py-1 text-xs shadow-sm ring-1 ring-slate-200 print:hidden">
+  {{ system_info.version }} · <button type="button" id="system-info-link" @click="open = true">Info</button>
+  · <span data-page-load></span>
+  <div x-show="open" x-cloak class="fixed inset-0 z-50 ...">...the table...</div>
+</div>
+{% endif %}
+```
+
 **Info** opens a dialog with the table above plus the **page load** measured in
 the browser (Navigation Timing: `loadEventEnd - startTime`). The link **turns
 red when the page took over a second**, in the browser or on the server. The
