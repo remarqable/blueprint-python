@@ -548,8 +548,8 @@ class ForbiddenError(AppError):
 | [core/testing.md](patterns/core/testing.md) | pytest, fixtures, isolation tests |
 | [core/typing.md](patterns/core/typing.md) | Type hints and mypy |
 | [core/audit.md](patterns/core/audit.md) | `created_by` / `updated_by` |
-| [core/deployment.md](patterns/core/deployment.md) | systemd + Gunicorn + Caddy, the "be right back" page, request profiling (admin Info box) |
-| [core/performance.md](patterns/core/performance.md) | N+1 is a bug, query-count tests, eager-loading defaults, static file caching |
+| [core/deployment.md](patterns/core/deployment.md) | systemd + Gunicorn + Caddy, the "be right back" page, request profiling (admin Info box), slow-request log, server monitoring (access log, atop, alerts) |
+| [core/performance.md](patterns/core/performance.md) | N+1 is a bug, query-count tests, eager-loading defaults, self-refreshing pages, crawlers and capacity, static file caching |
 
 ### Layers — read only when the condition holds
 

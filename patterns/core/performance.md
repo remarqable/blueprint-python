@@ -21,6 +21,7 @@ Measuring comes first and is already built: the admin **Info** box and the
 - [Fixing It](#fixing-it)
 - [Relationship Loading](#relationship-loading)
 - [Caching Data](#caching-data)
+- [Crawlers and Capacity](#crawlers-and-capacity)
 - [Static Files](#static-files)
 - [Compression](#compression)
 - [Checklist](#checklist)
@@ -255,6 +256,9 @@ loads a thousand rows' worth of that collection, on pages that never show it.
   off for that query: `.options(lazyload(Post.attachments))`. `lazyload` still loads
   on first touch, so nothing breaks if a template does use it; `noload` returns
   an empty list instead, and silently hides a bug.
+- A list that shows only a row's own columns (teammates on a profile: name,
+  photo, a line of text) turns them all off: `.options(lazyload('*'))`. Each
+  eager collection is one more round trip per query, however good the index.
 
 ---
 
@@ -296,6 +300,47 @@ and prefer expiry to invalidation, which is correct only until the third writer.
 
 **Don't cache HTML pages in a shared cache.** A page carries the session cookie,
 a CSRF token and, for admins, the Info box. Fix the queries instead.
+
+**Skip a lookup for a feature nobody uses yet.** A query run on every page for
+something almost every page has none of (events, before anyone adds one) costs a
+round trip each time. Keep the set of owners that have any, a minute per process,
+and skip the query when the page's owner isn't in it, but only for anonymous
+visitors inside a request: signed-in people (who just added one) and jobs always
+ask.
+
+**A page that refreshes itself** (`hx-trigger="every 5s"` while work runs)
+multiplies its cost by every open tab, all day. Compute only what the visible
+page shows (the rows of its page, not all of them), and keep an expensive figure
+a few seconds per process so each refresh doesn't measure it again.
+
+---
+
+## Crawlers and Capacity
+
+A public directory's traffic is mostly crawlers: search engines, SEO tools and,
+increasingly, AI crawlers (ClaudeBot, PerplexityBot, GPTBot, Amazonbot), each
+able to send several pages a second, for hours. On a small server they, not
+people, decide capacity. Measure before deciding anything
+([deployment.md § Server Monitoring](deployment.md#server-monitoring)):
+
+- **Capacity is CPU-seconds per page.** At 0.2s of CPU a page, 2 CPUs serve
+  about 10 pages a second; past that, requests queue, and every page, cheap or
+  not, takes seconds. Request timings taken under load include that wait (and a
+  query's measured time includes waiting for the CPU), so profile a page on its
+  own to know its real cost.
+- **Count queries even when they're fast.** With a managed database over the
+  network, a query costs ~2 ms of round trip and ORM work, whatever Postgres
+  takes (0.03 ms with the index). 25 queries is 50 ms before any template.
+- **Check the repeat rate before caching pages.** Crawlers read each page once:
+  on a 300k-page directory, 1–2% of profile pages were asked for twice in an
+  hour. A page cache would miss; cheaper pages and fewer requests help.
+- **Don't let one page become thousands of addresses.** A link with a per-page
+  query (`/why-us?claim=<id>`) turns one page into one address per profile, and
+  crawlers fetch them all. Mark such links `rel="nofollow"`, point the canonical
+  at the plain address, and `Disallow: /why-us?` in `robots.txt`.
+- **Slowing a crawler is a product decision.** `Crawl-delay` (honoured by some,
+  ClaudeBot included, not all) trades discovery for load; blocking trades it
+  away entirely. Decide it on purpose, with the access log's numbers.
 
 ---
 
@@ -391,6 +436,9 @@ Before a page that lists rows is done:
 - [ ] No collection relationship defaults to eager; eager loads are per query
 - [ ] Lists page in SQL
 - [ ] The admin Info box shows it under a second in production
+- [ ] A list showing only its rows' own columns turns eager loads off (`lazyload('*')`)
+- [ ] A page that refreshes itself computes only what's on screen
+- [ ] A link with a per-item query string on every public page is `nofollow` and disallowed
 
 Once per project:
 
