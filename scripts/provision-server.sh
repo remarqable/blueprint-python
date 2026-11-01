@@ -182,8 +182,29 @@ echo -e "${CHECK} Systemd service created: $APP_NAME.service"
 # 11. Create Caddyfile
 # ============================================================================
 echo -e "${INFO} Creating Caddyfile..."
+# Every request, one JSON line each (patterns/core/deployment.md#server-monitoring):
+# 14 days, at most 10 x 50 MB; a link's token (/auth/magic/<token>...) masked.
+# The file is Caddy's before anything (caddy validate, run as root) creates it.
+install -d -o caddy -g caddy -m 755 /var/log/caddy
+touch /var/log/caddy/access.log && chown caddy:caddy /var/log/caddy/access.log && chmod 600 /var/log/caddy/access.log
 cat > /etc/caddy/Caddyfile <<EOF
+(access_log) {
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 50MiB
+            roll_keep 10
+            roll_keep_for 336h
+        }
+        format filter {
+            request>uri regexp "/(magic|confirm|unsubscribe|undo)/[^/?]+" "/\${1}/-"
+            resp_headers delete
+            wrap json
+        }
+    }
+}
+
 $APP_DOMAIN {
+    import access_log
     reverse_proxy localhost:8000
 }
 
@@ -192,6 +213,16 @@ www.$APP_DOMAIN {
 }
 EOF
 echo -e "${CHECK} Caddyfile created for $APP_DOMAIN"
+
+# ============================================================================
+# 11b. atop: every process's CPU, memory and disk, each minute, kept 14 days
+# (patterns/core/deployment.md#server-monitoring)
+# ============================================================================
+echo -e "${INFO} Installing atop..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq atop
+sed -i 's/^LOGINTERVAL=.*/LOGINTERVAL=60/; s/^LOGGENERATIONS=.*/LOGGENERATIONS=14/' /etc/default/atop
+systemctl enable -q atop && systemctl restart atop
+echo -e "${CHECK} atop recording every minute (/var/log/atop)"
 
 # ============================================================================
 # 12. Set permissions

@@ -17,6 +17,7 @@
 - [Docker Distribution](#docker-distribution)
 - [Health Check](#health-check)
 - [Request Profiling (System Info)](#request-profiling-system-info)
+- [Server Monitoring](#server-monitoring)
 - [Production Checklist](#production-checklist)
 
 ---
@@ -724,6 +725,123 @@ time. What the numbers say:
 The fixes, and the test that keeps an N+1 from coming back:
 [performance.md](performance.md).
 
+### Slow requests in the journal
+
+The Info box only helps when an admin is looking. Every request slower than
+`SLOW_REQUEST_MS` (default 1000) also writes one structured line, whoever asked,
+so a slow page a crawler or a customer hit is on record:
+
+```python
+# in the after_request hook, for everyone (the Server-Timing header stays admins-only)
+total = (time.monotonic() - g.request_start) * 1000
+if total >= app.config.get('SLOW_REQUEST_MS', 1000):
+    log.warning('slow_request', endpoint=request.endpoint,
+                rule=request.url_rule.rule if request.url_rule else None,   # the pattern, never the path
+                method=request.method, status=response.status_code, ms=round(total),
+                db_ms=round(g.db_time * 1000), queries=g.db_queries,
+                htmx=request.headers.get('HX-Request') == 'true',
+                user_id=current_user.id if current_user.is_authenticated else None,
+                request_id=g.request_id, pid=os.getpid())
+```
+
+Log the **route pattern** (`/auth/magic/<token>`), not `request.path`: some paths
+carry a token. `journalctl -u yourapp --since "10:15" --until "10:25" | grep slow_request`.
+
+---
+
+## Server Monitoring
+
+The provider's graphs (DigitalOcean's Insights) say *that* the load went over 6
+at 10:20; they can't say *what* did it. Record three things on every web
+server from the day it's provisioned (`scripts/provision-server.sh` does), so
+the next spike can be explained after the fact:
+
+| What | Answers | Where | Kept |
+|---|---|---|---|
+| **Caddy access log** (JSON) | which requests, from whom (IP, user agent), how long each took | `/var/log/caddy/access.log` | 14 days, 10 × 50 MB |
+| **`slow_request` lines** (the app) | which route was slow, its DB time and query count, admin or not, the worker PID | the journal (`journalctl -u yourapp`) | the journal's own limit |
+| **atop** | which process used the CPU, memory and disk, each minute | `/var/log/atop/atop_YYYYMMDD` | 14 days |
+
+Plus **an alert** in the provider's console (DigitalOcean: Monitoring → Create
+alert policy) on CPU and load, to email the team while it's happening.
+
+### The access log
+
+```caddyfile
+(access_log) {
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 50MiB
+            roll_keep 10
+            roll_keep_for 336h
+        }
+        format filter {
+            request>uri regexp "/(magic|confirm|unsubscribe|undo)/[^/?]+" "/${1}/-"
+            resp_headers delete
+            wrap json
+        }
+    }
+}
+
+yourapp.com {
+    import access_log
+    reverse_proxy localhost:8000
+}
+```
+
+- **Mask tokens in paths** (magic links, email confirmations, unsubscribe and
+  undo links) with the `regexp` filter; list every route that takes a token.
+  Caddy already writes `Cookie` and `Authorization` as `REDACTED`.
+- `import access_log` in **every site block that reaches the app**, including
+  the plain-HTTP ones a load balancer uses.
+- **Create the file as `caddy` first** (`install -d -o caddy -g caddy
+  /var/log/caddy`; `touch` + `chown` the file). `caddy validate`, run as root,
+  creates it root-owned `0600`, and the reload then fails with "opening log
+  writer". The old config keeps serving, so it's easy to miss.
+- It holds visitors' IP addresses for 14 days: say so in the privacy policy.
+
+### atop
+
+```bash
+apt-get install -y atop
+sed -i 's/^LOGINTERVAL=.*/LOGINTERVAL=60/; s/^LOGGENERATIONS=.*/LOGGENERATIONS=14/' /etc/default/atop
+systemctl enable atop && systemctl restart atop
+```
+
+The default is every 10 minutes, too coarse for a spike that lasts five.
+`sysstat`, often already installed, is system-wide only: it says the CPU was
+busy, never which process.
+
+### Explaining a spike
+
+```bash
+# 1. Which processes, minute by minute (t / T step forward and back; c = command lines)
+atop -r /var/log/atop/atop_20261101 -b 16:15 -e 16:25
+
+# 2. Which requests: busiest paths by total time in that window (UTC)
+python3 - <<'PY'
+import json, collections, datetime as dt
+lo, hi = (dt.datetime(2026, 11, 1, h, m, tzinfo=dt.timezone.utc).timestamp() for h, m in ((16, 15), (16, 25)))
+took, n, agents = collections.Counter(), collections.Counter(), collections.Counter()
+for line in open('/var/log/caddy/access.log'):
+    j = json.loads(line)
+    if lo <= j['ts'] < hi:
+        path = '/'.join(j['request']['uri'].split('?')[0].split('/')[:3])
+        took[path] += j['duration']; n[path] += 1
+        agents[j['request']['headers'].get('User-Agent', [''])[0][:50]] += 1
+for path, s in took.most_common(15): print(f'{s:7.1f}s {n[path]:6} {path}')
+for agent, c in agents.most_common(5): print(c, agent)
+PY
+
+# 3. Which routes were slow, and why (DB time against total)
+journalctl -u yourapp --since "2026-11-01 16:15" --until "2026-11-01 16:25" -o cat | grep slow_request
+```
+
+A page an admin keeps open that refreshes itself (`hx-trigger="every 5s"`)
+shows up in all three: the same route every few seconds, from one user. Make
+what it computes per refresh cheap: measure only the rows on the page and keep
+expensive figures a few seconds (see [performance.md](performance.md)).
+
 ---
 
 ## Production Checklist
@@ -748,6 +866,7 @@ The fixes, and the test that keeps an N+1 from coming back:
 - [ ] Health check endpoint working
 - [ ] "Be right back" page installed (Caddy `handle_errors`), tested by stopping the service
 - [ ] Request profiling on: admin Info link, Server-Timing for admins only
+- [ ] Slow requests logged (`slow_request`, route pattern not path)
 - [ ] Static URLs versioned and cached a year ([performance.md](performance.md#static-files))
 - [ ] Structured logging enabled
 - [ ] Error tracking configured (optional: Sentry)
@@ -758,6 +877,9 @@ The fixes, and the test that keeps an N+1 from coming back:
 - [ ] Caddy configured with domain, `encode zstd gzip` on
 - [ ] SSL certificate active
 - [ ] Firewall configured (only 80, 443, 22)
+- [ ] Caddy access log on, tokens masked, file owned by `caddy` ([Server Monitoring](#server-monitoring))
+- [ ] atop recording every minute, 14 days
+- [ ] CPU and load alert set in the provider's console
 - [ ] Log rotation configured
 
 ### Backup Strategy
