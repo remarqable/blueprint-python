@@ -778,7 +778,7 @@ the next spike can be explained after the fact:
 
 | What | Answers | Where | Kept |
 |---|---|---|---|
-| **Caddy access log** (JSON) | which requests, from whom (IP, user agent), how long each took | `/var/log/caddy/access.log` | 14 days, 10 × 50 MB |
+| **Caddy access log** (JSON) | which requests, from whom (IP, user agent), how long each took | `/var/log/caddy/access.log` | 14 days, rolled every 50 MB |
 | **`slow_request` lines** (the app) | which route was slow, its DB time and query count, admin or not, the worker PID | the journal (`journalctl -u yourapp`) | the journal's own limit |
 | **atop** | which process used the CPU, memory and disk, each minute | `/var/log/atop/atop_YYYYMMDD` | 14 days |
 
@@ -792,7 +792,7 @@ alert policy) on CPU and load, to email the team while it's happening.
     log {
         output file /var/log/caddy/access.log {
             roll_size 50MiB
-            roll_keep 10
+            roll_keep 400
             roll_keep_for 336h
         }
         format filter {
@@ -809,6 +809,11 @@ yourapp.com {
 }
 ```
 
+- **Let the age decide what's kept, not the file count.** `roll_keep_for 336h`
+  keeps 14 days only if `roll_keep` allows that many files: at 50 MB a file, a
+  site with crawlers at several pages a second rolls every hour or so, and
+  `roll_keep 10` kept 14 hours. Rolled files are gzipped (~5 MB), so
+  `roll_keep 400` costs at most ~2 GB.
 - **Mask tokens in paths** (magic links, email confirmations, unsubscribe and
   undo links) with the `regexp` filter; list every route that takes a token.
   Caddy already writes `Cookie` and `Authorization` as `REDACTED`.

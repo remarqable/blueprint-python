@@ -183,7 +183,7 @@ echo -e "${CHECK} Systemd service created: $APP_NAME.service"
 # ============================================================================
 echo -e "${INFO} Creating Caddyfile..."
 # Every request, one JSON line each (patterns/core/deployment.md#server-monitoring):
-# 14 days, at most 10 x 50 MB; a link's token (/auth/magic/<token>...) masked.
+# 14 days (roll_keep_for; up to 400 rolled files, so the age decides, not the count); a link's token (/auth/magic/<token>...) masked.
 # The file is Caddy's before anything (caddy validate, run as root) creates it.
 install -d -o caddy -g caddy -m 755 /var/log/caddy
 touch /var/log/caddy/access.log && chown caddy:caddy /var/log/caddy/access.log && chmod 600 /var/log/caddy/access.log
@@ -192,7 +192,7 @@ cat > /etc/caddy/Caddyfile <<EOF
     log {
         output file /var/log/caddy/access.log {
             roll_size 50MiB
-            roll_keep 10
+            roll_keep 400
             roll_keep_for 336h
         }
         format filter {
