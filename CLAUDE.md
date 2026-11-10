@@ -27,6 +27,7 @@ reference, not for context.
 | `patterns/storage.md` | `uploads: true` |
 | `patterns/jobs.md` | `jobs: true` |
 | `patterns/staging.md` | `staging: true` (requires `deploy: vps`) |
+| `patterns/admin-api.md` | `admin_api: true` |
 
 Two further decisions select *sections within* core docs rather than layer
 docs: `auth` picks one strategy inside `patterns/core/auth.md`, and `deploy`
@@ -59,6 +60,7 @@ uploads: false         # true | false
 jobs: false            # true | false
 deploy: vps            # vps | docker
 staging: false         # true | false  (deploy: vps only)
+admin_api: false       # true | false
 ```
 
 ### The questions to ask
@@ -113,6 +115,13 @@ routed by Caddy on the subdomain, open to admins only. Branches are deployed
 there and tried, on a copy of production's data when needed, before `main`
 goes to production. See [staging.md](patterns/staging.md). Requires
 `deploy: vps`.
+
+**11. Will an agent or script read the app's numbers?** → `admin_api`. `true`
+adds API keys made in the admin panel and a read-only REST API at
+`/admin/api/v1`: signups, sign-ins, active people, activation, retention,
+product metrics, and (with its own scope) the people themselves. The contract is
+the remarQable spec `docs/specs/admin-api.md`. See
+[admin-api.md](patterns/admin-api.md).
 
 ---
 
@@ -561,6 +570,7 @@ class ForbiddenError(AppError):
 | [storage.md](patterns/storage.md) | `uploads: true` | File uploads, image variants, safe serving |
 | [jobs.md](patterns/jobs.md) | `jobs: true` | DB-backed queue, worker process, retries |
 | [staging.md](patterns/staging.md) | `staging: true` | Second copy on the same VPS, subdomain routing, refresh from production |
+| [admin-api.md](patterns/admin-api.md) | `admin_api: true` | API keys, the metric registry, the read-only API for agents |
 
 ### Skills — procedures to run, not patterns to read
 

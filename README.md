@@ -46,7 +46,8 @@ blueprint-python/
 │   ├── plugins.md                 # layer: plugins: true
 │   ├── theming.md                 # layer: theming: true
 │   ├── storage.md   jobs.md       # layers: uploads: true, jobs: true
-│   └── staging.md                 # layer: staging: true
+│   ├── staging.md                 # layer: staging: true
+│   └── admin-api.md               # layer: admin_api: true
 ├── skills/                        # procedures to run, not patterns to read
 │   └── blueprint-audit/           # the mandatory conformance gate
 ├── scripts/                       # deploy.sh, provision-server.sh

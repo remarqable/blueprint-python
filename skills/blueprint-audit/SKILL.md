@@ -46,7 +46,7 @@ rule, and the reviewer must obey it too:
 
 - `patterns/core/` applies to every project. Always in scope.
 - A layer doc (`tenancy.md`, `plugins.md`, `theming.md`, `storage.md`,
-  `jobs.md`, `staging.md`) is in scope **only** if that layer is enabled.
+  `jobs.md`, `staging.md`, `admin-api.md`) is in scope **only** if that layer is enabled.
 - Two decisions select a section *within* a core doc rather than a layer doc:
   `auth` picks one strategy inside `patterns/core/auth.md`, and `deploy` picks
   one shape inside `patterns/core/deployment.md`. Review against the chosen
@@ -113,7 +113,7 @@ more than one language blueprint. Everything below is relative to that path:
 - Always-applicable patterns: `<blueprint>/patterns/core/` — `audit`, `auth`,
   `database`, `deployment`, `frontend`, `htmx`, `i18n`, `mobile-navigation`,
   `mvc`, `performance`, `portability`, `security`, `testing`, `typing`
-- Layer docs: `<blueprint>/patterns/` — `jobs.md`, `plugins.md`, `staging.md`,
+- Layer docs: `<blueprint>/patterns/` — `admin-api.md`, `jobs.md`, `plugins.md`, `staging.md`,
   `storage.md`, `theming.md`, `tenancy.md`
 
 If the directory is empty, the submodule is not initialized. Stop and tell the
@@ -139,6 +139,7 @@ Evidence to look for:
 | `theming: true` | A themes directory under views, theme install or activation code |
 | `uploads: true` | An upload model, a media or uploads directory under the data dir |
 | `jobs: true` | A job model, a worker entrypoint such as `flask jobs run` |
+| `admin_api: true` | An `ApiKey` model, routes under `/admin/api/v1` |
 | `audit_logging: true` | An audit log model or table |
 | `auth` | `password` if the user model hashes and verifies passwords; `magic_links` if it issues single-use login tokens |
 | `database` | `DATABASE_URL` handling in config; note the default |
@@ -187,6 +188,7 @@ Active project configuration:
      storage.md  -> only if uploads: true
      jobs.md     -> only if jobs: true
      staging.md  -> only if staging: true
+     admin-api.md -> only if admin_api: true
    If a layer is disabled, do not open its doc at all — not for reference,
    not for context.
 3. For auth and deployment, read only the branch the configuration selects
