@@ -14,7 +14,7 @@ modes called out where they bite.
 
 ## Quick Start
 
-Point Claude at [CLAUDE.md](CLAUDE.md). It will ask five configuration questions,
+Point Claude at [CLAUDE.md](CLAUDE.md). It will ask the configuration questions,
 record the answers, and build from there.
 
 ```bash
@@ -40,6 +40,8 @@ blueprint-python/
 │   │   ├── security.md            # CSRF, rate limiting, checklist
 │   │   ├── i18n.md   htmx.md   frontend.md   mobile-navigation.md
 │   │   ├── testing.md   typing.md   audit.md
+│   │   ├── observability.md       # correlation IDs, logging, metrics
+│   │   ├── data-modeling.md       # evidence vs derivation, temporal data
 │   │   ├── performance.md         # N+1, query counts, static caching
 │   │   └── deployment.md          # systemd + Gunicorn + Caddy
 │   ├── tenancy.md                 # layer: tenancy: shared
@@ -47,12 +49,14 @@ blueprint-python/
 │   ├── theming.md                 # layer: theming: true
 │   ├── storage.md   jobs.md       # layers: uploads: true, jobs: true
 │   ├── staging.md                 # layer: staging: true
-│   └── admin-api.md               # layer: admin_api: true
+│   ├── admin-api.md               # layer: admin_api: true
+│   ├── realtime.md   ai.md        # layers: realtime: true, ai: true
+│   └── scale.md                   # layer: the dominant table is large
 ├── skills/                        # procedures to run, not patterns to read
 │   └── blueprint-audit/           # the mandatory conformance gate
 ├── VERSION                        # the current version
 ├── upgrades/                      # one file per version: how a project reaches it
-├── scripts/                       # deploy.sh, provision-server.sh, check-version.py
+├── scripts/                       # deploy.sh, provision-server.sh, check-links.py, check-version.py
 └── Makefile
 ```
 
@@ -82,8 +86,8 @@ See [skills/README.md](skills/README.md).
 `blueprint_version` in its own `CLAUDE.md`.
 
 ```bash
-cd blueprint && git fetch --tags && git checkout v2.0.0
-cd .. && git add blueprint && git commit -m "Update the blueprint to 2.0.0"
+cd blueprint && git fetch --tags && git checkout v2.1.0
+cd .. && git add blueprint && git commit -m "Update the blueprint to 2.1.0"
 # then ask the agent: "upgrade to the new blueprint version"
 ```
 
@@ -94,8 +98,9 @@ never upgrades unprompted.
 
 ## Configuration
 
-The blueprint asks five questions up front, because they change the generated
-code:
+The blueprint asks its questions up front, because they change the generated
+code. These are the ones that shape the data model; the full list, with
+defaults, is in [CLAUDE.md](CLAUDE.md#the-questions-to-ask):
 
 | Question | Setting |
 |----------|---------|
@@ -104,6 +109,9 @@ code:
 | Do tenants customize the UI? | `theming` |
 | Track who changed what? | `audit_logging` |
 | SQLite or PostgreSQL? | `database` |
+
+The rest switch on layers and stricter options: `auth`, `uploads`, `jobs`,
+`deploy`, `staging`, `admin_api`, `realtime`, `ai`, `tenant_isolation` and `csp`.
 
 The first one is the one people get wrong. It is not "B2C or B2B?" — that asks
 about your go-to-market label rather than your data model. Adding `org_id` later

@@ -86,10 +86,12 @@ diff` that may also sweep in unrelated working-tree edits.
 
 | File pattern | Brings in |
 |---|---|
-| `app/models/*.py` | MVC, database (incl. N+1), typing, tenancy |
+| `app/models/*.py` | MVC, database (incl. N+1), data-modeling, typing, tenancy |
 | `app/controllers/*.py` | MVC, auth, security, database (N+1), typing |
 | `app/views/**/*.html` | Frontend, HTMX, i18n, CSRF, database (relationships touched in loops) |
-| `app/platform/**` | Whichever layer that subsystem implements |
+| `app/platform/**` | Whichever layer that subsystem implements; observability for logging and request middleware |
+| `wsgi_gateway.py`, `app/gateway.py`, `app/platform/realtime.py` | Realtime layer |
+| `app/platform/ai.py`, `evals/**` | AI layer |
 | `app/static/css/**` | Frontend — and check `app.css` was rebuilt |
 | `plugins/**` | Plugins layer |
 | `app/views/themes/**` | Theming layer |
@@ -111,10 +113,11 @@ more than one language blueprint. Everything below is relative to that path:
 
 - Master doc: `<blueprint>/CLAUDE.md`
 - Always-applicable patterns: `<blueprint>/patterns/core/` — `audit`, `auth`,
-  `database`, `deployment`, `frontend`, `htmx`, `i18n`, `mobile-navigation`,
-  `mvc`, `performance`, `portability`, `security`, `testing`, `typing`
-- Layer docs: `<blueprint>/patterns/` — `admin-api.md`, `jobs.md`, `plugins.md`, `staging.md`,
-  `storage.md`, `theming.md`, `tenancy.md`
+  `data-modeling`, `database`, `deployment`, `frontend`, `htmx`, `i18n`,
+  `mobile-navigation`, `mvc`, `observability`, `performance`, `portability`,
+  `security`, `testing`, `typing`
+- Layer docs: `<blueprint>/patterns/` — `admin-api.md`, `ai.md`, `jobs.md`, `plugins.md`,
+  `realtime.md`, `scale.md`, `staging.md`, `storage.md`, `theming.md`, `tenancy.md`
 
 If the directory is empty, the submodule is not initialized. Stop and tell the
 user to run `git submodule update --init --recursive` — do not review against
@@ -140,7 +143,11 @@ Evidence to look for:
 | `uploads: true` | An upload model, a media or uploads directory under the data dir |
 | `jobs: true` | A job model, a worker entrypoint such as `flask jobs run` |
 | `admin_api: true` | An `ApiKey` model, routes under `/admin/api/v1` |
-| `audit_logging: true` | An audit log model or table |
+| `audit_logging: true` | An `AuditMixin`, or `created_by` / `updated_by` columns on business models (record audit, not an audit log table) |
+| `realtime: true` | A `wsgi_gateway.py` entrypoint with its own systemd unit, an SSE stream view, a broker module |
+| `ai: true` | An `app/platform/ai.py` provider module, an `ai_call` model, an `evals/` directory |
+| `tenant_isolation: rls` | `CREATE POLICY` / `ROW LEVEL SECURITY` in migrations, a separate owner database URL |
+| `csp: strict` | The Alpine CSP build vendored in `app/static/js`, `Alpine.data` components, a CSP header without `unsafe-eval` |
 | `auth` | `password` if the user model hashes and verifies passwords; `magic_links` if it issues single-use login tokens |
 | `database` | `DATABASE_URL` handling in config; note the default |
 | `deploy` | `docker` if there is a Dockerfile and compose file; `vps` if there is a systemd or Caddy provisioning script; both can be true |
@@ -200,19 +207,28 @@ Active project configuration:
      jobs.md     -> only if jobs: true
      staging.md  -> only if staging: true
      admin-api.md -> only if admin_api: true
+     realtime.md -> only if realtime: true
+     ai.md       -> only if ai: true
+     scale.md    -> only if the configuration says the dominant table is large
    If a layer is disabled, do not open its doc at all — not for reference,
    not for context.
 3. For auth and deployment, read only the branch the configuration selects
    inside patterns/core/auth.md and patterns/core/deployment.md. Do not
-   review against the branch this project did not choose.
+   review against the branch this project did not choose. The same holds for
+   two opt-in sections: "Row-Level Security (opt-in)" in tenancy.md applies
+   only if tenant_isolation: rls, and "Strict CSP (opt-in)" in
+   core/security.md with "Alpine with a Strict CSP (opt-in)" in
+   core/frontend.md apply only if csp: strict. If the setting is absent, it
+   is off.
 
 Which core docs the changes pull in:
-   Models      -> core/mvc.md, core/database.md, core/performance.md, core/typing.md
+   Models      -> core/mvc.md, core/database.md, core/data-modeling.md, core/performance.md, core/typing.md
    Controllers -> core/mvc.md, core/auth.md, core/security.md, core/performance.md
    Templates   -> core/frontend.md, core/htmx.md, core/i18n.md, core/performance.md
    Migrations  -> core/database.md
    Tests       -> core/testing.md
    Anything that touches paths, config, or the data dir -> core/portability.md
+   Logging, request middleware, health or metrics endpoints -> core/observability.md
 
 ## Rules
 

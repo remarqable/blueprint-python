@@ -11,8 +11,6 @@
 - [Template Structure](#template-structure)
 - [Mobile Base Layout](#mobile-base-layout)
 - [Navigation Components](#navigation-components)
-- [Page Patterns](#page-patterns)
-- [CSS Variables](#css-variables)
 - [Controller Integration](#controller-integration)
 - [Testing](#testing)
 

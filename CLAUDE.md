@@ -28,11 +28,17 @@ reference, not for context.
 | `patterns/jobs.md` | `jobs: true` |
 | `patterns/staging.md` | `staging: true` (requires `deploy: vps`) |
 | `patterns/admin-api.md` | `admin_api: true` |
+| `patterns/realtime.md` | `realtime: true` |
+| `patterns/ai.md` | `ai: true` (requires `jobs: true`) |
+| `patterns/scale.md` | the dominant table is large |
 
-Two further decisions select *sections within* core docs rather than layer
-docs: `auth` picks one strategy inside `patterns/core/auth.md`, and `deploy`
-picks one shape inside `patterns/core/deployment.md`. The same rule applies —
-implement the chosen branch, do not blend.
+Four further decisions select *sections within* docs rather than layer docs:
+`auth` picks one strategy inside `patterns/core/auth.md`, `deploy` picks one
+shape inside `patterns/core/deployment.md`, `tenant_isolation: rls` adds the
+Row-Level Security section of `patterns/tenancy.md`, and `csp: strict` adds the
+strict-CSP sections of `patterns/core/security.md` and
+`patterns/core/frontend.md`. The same rule applies — implement the chosen
+branch, do not blend.
 
 `skills/` is not a layer and has no condition. It holds procedures rather than
 patterns, and [`skills/blueprint-audit`](skills/blueprint-audit/SKILL.md) runs
@@ -61,7 +67,11 @@ jobs: false            # true | false
 deploy: vps            # vps | docker
 staging: false         # true | false  (deploy: vps only)
 admin_api: false       # true | false
-blueprint_version: 2.0.0   # the VERSION this project was built against
+realtime: false        # true | false
+ai: false              # true | false  (requires jobs: true)
+tenant_isolation: app  # app | rls  (rls requires tenancy: shared and database: postgres)
+csp: relaxed           # relaxed | strict
+blueprint_version: 2.1.0   # the VERSION this project was built against
 ```
 
 ### The questions to ask
@@ -84,7 +94,8 @@ Carrying it from day one costs one indexed column. **When unsure, choose
 
 **3. Do tenants need to customize the UI?** → `theming`
 
-**4. Track who changed what?** → `audit_logging` (adds `created_by`/`updated_by`)
+**4. Track who changed what?** → `audit_logging` (adds `created_by`/`updated_by`
+to records — record audit, [not an audit log](patterns/core/audit.md#this-is-not-an-audit-log))
 
 **5. SQLite or PostgreSQL?** → `database`. SQLite is the default and is a
 one-variable switch later, provided you follow
@@ -123,6 +134,29 @@ adds API keys made in the admin panel and a read-only REST API at
 product metrics, and (with its own scope) the people themselves. The contract is
 the remarQable spec `docs/specs/admin-api.md`. See
 [admin-api.md](patterns/admin-api.md).
+
+**12. Do clients need to see changes without asking?** → `realtime`. Chat,
+presence, live counters. Adds a gateway process beside the app. See
+[realtime.md](patterns/realtime.md).
+
+**13. Does the product call a language model?** → `ai`. Requires `jobs: true`:
+inference never runs inside a request. See [ai.md](patterns/ai.md).
+
+**14. Should the database itself refuse cross-tenant access?** →
+`tenant_isolation`. `app` (default) scopes every query in the application, as
+[tenancy.md](patterns/tenancy.md) describes. `rls` adds PostgreSQL Row-Level
+Security underneath it, so a query that escapes the application's scoping still
+returns nothing. Requires `tenancy: shared` and `database: postgres`. See
+[tenancy.md](patterns/tenancy.md#row-level-security-opt-in).
+
+**15. Must the Content-Security-Policy forbid inline script?** → `csp`.
+`relaxed` (default) allows Alpine's inline expressions. `strict` uses Alpine's
+CSP build and a policy with no `unsafe-eval`: choose it for a new project that
+expects a security review. See
+[core/security.md](patterns/core/security.md#strict-csp-opt-in).
+
+`patterns/scale.md` has no setting. It applies when one table has grown large
+enough to dominate the database; say which way you judged it.
 
 ---
 
@@ -220,6 +254,9 @@ EOF
 | `app/platform/i18n.py` | [core/i18n.md](patterns/core/i18n.md) |
 | `app/platform/assets.py` | [core/performance.md](patterns/core/performance.md#static-files) |
 | `app/platform/tenant.py` | [tenancy.md](patterns/tenancy.md) — only if `tenancy: shared` |
+| `app/platform/rls.py` | [tenancy.md](patterns/tenancy.md#row-level-security-opt-in) — only if `tenant_isolation: rls` |
+| `app/platform/obs.py` | [core/observability.md](patterns/core/observability.md#correlation) |
+| `app/platform/ai.py` | [ai.md](patterns/ai.md) — only if `ai: true` |
 
 ### Step 6: First model, controller, view
 
@@ -449,6 +486,16 @@ def create_app(config_class=Config):
     from .platform.tenant import init_tenant
     init_tenant(app)
 
+    # tenant_isolation: rls only -- directly after init_tenant (tenancy.md)
+    # from .platform.rls import init_rls; init_rls(app)
+
+    # realtime: true only (realtime.md)
+    # from .platform.realtime import init_realtime; init_realtime(app)
+
+    # Request and trace IDs on every log line (core/observability.md)
+    from .platform.obs import register_observability
+    register_observability(app)
+
     from .controllers import main, auth, users, settings
     for module in (main, auth, users, settings):
         app.register_blueprint(module.bp)
@@ -558,6 +605,8 @@ class ForbiddenError(AppError):
 | [core/testing.md](patterns/core/testing.md) | pytest, fixtures, isolation tests |
 | [core/typing.md](patterns/core/typing.md) | Type hints and mypy |
 | [core/audit.md](patterns/core/audit.md) | `created_by` / `updated_by` |
+| [core/observability.md](patterns/core/observability.md) | Correlation IDs, logging, metrics, alerting, what never to log |
+| [core/data-modeling.md](patterns/core/data-modeling.md) | Evidence vs derivation, temporal data, superseding, graph shapes |
 | [core/deployment.md](patterns/core/deployment.md) | systemd + Gunicorn + Caddy, the "be right back" page, request profiling (admin Info box), slow-request log, server monitoring (access log, atop, alerts) |
 | [core/performance.md](patterns/core/performance.md) | N+1 is a bug, query-count tests, eager-loading defaults, self-refreshing pages, crawlers and capacity, static file caching |
 
@@ -569,9 +618,12 @@ class ForbiddenError(AppError):
 | [plugins.md](patterns/plugins.md) | `plugins: true` | Per-tenant installable features and routes |
 | [theming.md](patterns/theming.md) | `theming: true` | Per-tenant branding and template overrides |
 | [storage.md](patterns/storage.md) | `uploads: true` | File uploads, image variants, safe serving |
-| [jobs.md](patterns/jobs.md) | `jobs: true` | DB-backed queue, worker process, retries |
+| [jobs.md](patterns/jobs.md) | `jobs: true` | DB-backed queue, worker process, retries, idempotency, queues, graceful shutdown |
 | [staging.md](patterns/staging.md) | `staging: true` | Second copy on the same VPS, subdomain routing, refresh from production |
 | [admin-api.md](patterns/admin-api.md) | `admin_api: true` | API keys, the metric registry, the read-only API for agents |
+| [realtime.md](patterns/realtime.md) | `realtime: true` | SSE gateway, fanout, ordering, reconnect and resume |
+| [ai.md](patterns/ai.md) | `ai: true` | Providers, structured output, provenance, cost, evals |
+| [scale.md](patterns/scale.md) | The dominant table is large | Cursor pagination, partitioning, retention, pooling |
 
 ### Skills — procedures to run, not patterns to read
 
@@ -684,6 +736,17 @@ are overwhelmingly small changes.
 - Every interactive component carries its own ARIA; Tailwind ships none.
 - With `plugins: true`, plugin templates use `plugin_url_for`, never `url_for`,
   and no two plugin versions are ever registered on the same URL prefix.
+- With `jobs: true`, `enqueue` is the last statement of the work that caused it,
+  or is called with `commit=False` — otherwise the job commits and the cause may not.
+- With `ai: true`, inference runs in a job and reaches the model only through
+  `ai.call()`, so every call is recorded with its cost.
+- With `realtime: true`, streams are served only by the gateway process, never
+  the main app, and the gateway never writes domain data.
+- With `tenant_isolation: rls`, the app connects as the non-owner role and
+  `app.org_id` is set only in `app/platform/rls.py`.
+- With `csp: strict`, no inline `<script>`, `style=`, `on*=`, `hx-on` or Alpine
+  expression — the policy blocks them in production and nowhere else.
+- Never log credentials, session tokens or user content.
 - **Every implementation ends with the
   [blueprint audit](#-verification-every-change-is-audited)**, run by a separate
   agent, before the work is reported complete. A feature is not done when it
