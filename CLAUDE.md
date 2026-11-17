@@ -61,6 +61,7 @@ jobs: false            # true | false
 deploy: vps            # vps | docker
 staging: false         # true | false  (deploy: vps only)
 admin_api: false       # true | false
+blueprint_version: 2.0.0   # the VERSION this project was built against
 ```
 
 ### The questions to ask
@@ -582,6 +583,30 @@ See [skills/README.md](skills/README.md) for how to add one.
 
 ---
 
+## 🔖 Blueprint Version
+
+[`VERSION`](VERSION) holds the version of this copy of the blueprint. A project
+records the version it was built against as `blueprint_version` in its own root
+`CLAUDE.md`, beside its configuration answers.
+
+Before starting work, compare the two:
+
+| Project's `blueprint_version` | What to do |
+|-------------------------------|-----------|
+| Same as `blueprint/VERSION` | Nothing. |
+| Older, or not recorded | Tell the user in one line that the project is behind and an upgrade is available, then carry on with the task. **Do not upgrade unless asked.** |
+| Newer | The submodule is behind the project. Say so and stop: `git submodule update --init` is probably missing. |
+
+A project that is behind is not a project that is wrong. Code written against
+the older version is not a violation to fix in passing: the
+[blueprint audit](#-verification-every-change-is-audited) reports it as a pending upgrade, which does not block.
+
+When the user asks to upgrade, follow [upgrades/README.md](upgrades/README.md):
+one short file per version, applied in order, like migrations. Steps that touch
+stored data or public routes are marked **ask before applying**.
+
+---
+
 ## ✅ Verification: every change is audited
 
 **All code generated against this blueprint must conform to it, and conformance
@@ -622,6 +647,7 @@ and the audit does not have to infer them.
 1. Ask the [configuration questions](#the-questions-to-ask). Do not guess.
 2. Record the answers in the **project's own** root `CLAUDE.md`, not in this
    submodule — this file is shared, and editing it changes every project.
+   Record `blueprint_version` there too, copied from [`VERSION`](VERSION).
 3. Read all of `patterns/core/`. Read layer docs **only** where the condition holds.
 4. Execute Quick Start steps 1–7 in order.
 5. Verify `make run` serves `/health`.
@@ -639,6 +665,9 @@ and the audit does not have to infer them.
 
 Step 3 is not conditional on the size of the change. The violations this catches
 are overwhelmingly small changes.
+
+**Upgrading the blueprint:** only when the user asks, and only by following
+[upgrades/README.md](upgrades/README.md). See [Blueprint Version](#-blueprint-version).
 
 **Non-negotiables:**
 - `BigIntPK` for primary keys — a plain `BigInteger` PK breaks every INSERT on SQLite.

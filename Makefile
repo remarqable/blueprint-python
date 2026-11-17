@@ -1,4 +1,4 @@
-.PHONY: help install upgrade css css-watch assets migrate run test test-postgres clean deploy provision skills
+.PHONY: help install upgrade css css-watch assets migrate run test test-postgres clean deploy provision skills check
 
 TAILWIND_VERSION := v4.1.14
 TAILWIND_BIN := bin/tailwindcss
@@ -19,6 +19,7 @@ help:
 	@echo "  test       Run tests (SQLite in-memory)"
 	@echo "  test-postgres  Run tests against PostgreSQL"
 	@echo "  skills     Link blueprint skills into .claude/skills"
+	@echo "  check      Verify VERSION has a matching file in upgrades/ (blueprint repo only)"
 	@echo "  clean      Remove .venv and cache files"
 	@echo "  deploy     Deploy the application"
 	@echo "  provision  Show server provisioning instructions"
@@ -100,6 +101,9 @@ skills:
 	  echo '.claude/skills/' >> .gitignore; \
 	fi; \
 	echo "Skills linked. Restart Claude Code to pick them up."
+
+check:
+	./scripts/check-version.py
 
 deploy:
 	./scripts/deploy.sh

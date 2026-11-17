@@ -145,6 +145,17 @@ Evidence to look for:
 | `database` | `DATABASE_URL` handling in config; note the default |
 | `deploy` | `docker` if there is a Dockerfile and compose file; `vps` if there is a systemd or Caddy provisioning script; both can be true |
 
+**Blueprint version.** Read `<blueprint>/VERSION` and the project's
+`blueprint_version` (recorded with its configuration answers). Print both above
+the report. If the project is behind, or records no version, read the files in
+`<blueprint>/upgrades/` that are newer than the project's version and pass the
+changes they name to the reviewer with this instruction: a finding that exists
+only because of one of those changes, or because of a step listed under the
+project's `blueprint_skipped`, is reported as **Low** and labelled
+`pending upgrade <version>`. It does not block. Critical findings are never
+downgraded this way: a security or tenant-isolation hole blocks whatever version
+the project is on.
+
 ### Step 3: Check for a Linter
 
 If the blueprint ships a mechanical linter, run it first so the reviewer starts
