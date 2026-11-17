@@ -1,0 +1,11 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check VERSION has a matching upgrade file
+        run: ./scripts/check-version.py

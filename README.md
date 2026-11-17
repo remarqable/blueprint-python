@@ -50,7 +50,9 @@ blueprint-python/
 │   └── admin-api.md               # layer: admin_api: true
 ├── skills/                        # procedures to run, not patterns to read
 │   └── blueprint-audit/           # the mandatory conformance gate
-├── scripts/                       # deploy.sh, provision-server.sh
+├── VERSION                        # the current version
+├── upgrades/                      # one file per version: how a project reaches it
+├── scripts/                       # deploy.sh, provision-server.sh, check-version.py
 └── Makefile
 ```
 
@@ -72,6 +74,23 @@ make skills        # symlink skills/* into .claude/skills/
 ```
 
 See [skills/README.md](skills/README.md).
+
+## Versioning
+
+[`VERSION`](VERSION) names the current version, and each version is tagged
+`v<version>`. A project records the one it was built against as
+`blueprint_version` in its own `CLAUDE.md`.
+
+```bash
+cd blueprint && git fetch --tags && git checkout v2.0.0
+cd .. && git add blueprint && git commit -m "Update the blueprint to 2.0.0"
+# then ask the agent: "upgrade to the new blueprint version"
+```
+
+[upgrades/](upgrades/README.md) holds one short file per version with the steps
+a project takes to reach it, applied in order like migrations. Patch and minor
+versions need no action; a major version says exactly what to change. The agent
+never upgrades unprompted.
 
 ## Configuration
 
