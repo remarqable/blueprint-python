@@ -19,6 +19,7 @@
 - [RTL Support](#rtl-support)
 - [Dark Mode](#dark-mode)
 - [Accessibility](#accessibility)
+- [Alpine with a Strict CSP (opt-in)](#alpine-with-a-strict-csp-opt-in)
 
 ---
 
@@ -707,6 +708,311 @@ mouse clicks.
 `text-slate-500` is borderline for body text and `text-slate-400` fails. Use
 `text-slate-600` or darker for anything a user must read, and check your brand
 scale against its background rather than assuming.
+
+---
+
+## Alpine with a Strict CSP (opt-in)
+
+> **Applies only when the project's configuration says `csp: strict`**
+> ([Project Configuration](../../CLAUDE.md#-project-configuration)). With
+> `csp: relaxed`, the default, nothing in this section applies: use the
+> standard build and the inline expressions shown in [Alpine.js](#alpinejs)
+> and [Component Patterns](#component-patterns) exactly as written.
+
+The strict policy ([security.md](security.md#strict-csp-opt-in)) has no
+`'unsafe-eval'`, so the standard Alpine build cannot run its expressions.
+Alpine ships a second build for this, `@alpinejs/csp`. Behaviour moves out of
+the attributes into `app/static/js/app.js`; the markup, classes and ARIA stay
+the same.
+
+### The CSP build
+
+`make assets ALPINE_PKG=@alpinejs/csp` vendors the CSP build under the same
+file name, so the script tags in the layouts do not change. Set `ALPINE_PKG`
+in the project's Makefile so a plain `make assets` cannot put the standard
+build back:
+
+```bash
+make assets ALPINE_PKG=@alpinejs/csp
+# app/static/js/alpine.min.js        <- @alpinejs/csp
+# app/static/js/alpine-focus.min.js  <- @alpinejs/focus
+```
+
+The layout's `<head>` gains the HTMX configuration and `app.js`. `app.js`
+loads **before** Alpine so its `alpine:init` listener is registered in time;
+`defer` keeps document order.
+
+```html
+<!-- app/views/layouts/base.html (head) -->
+<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false}'>
+<link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
+<script src="{{ url_for('static', filename='js/htmx.min.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/alpine-focus.min.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/alpine.min.js') }}"></script>
+```
+
+`<body>` keeps its `hx-headers` and gains
+`data-error-message="{{ _('errors.request_failed') }}"` for the error hook
+below. The `[x-cloak]` rule from [Alpine.js](#alpinejs) is still required.
+
+### What the build accepts
+
+**Every Alpine attribute value is a name.** `x-data` names a component
+registered with `Alpine.data`. Every other directive names a property, a getter
+or a method of it, optionally with a dot path (`t.message`). In 3.14.9:
+
+| Attribute value | Result |
+|-----------------|--------|
+| `open`, `toggle`, `t.message` | Works |
+| `x-for="t in items"` | Works |
+| `!open`, `count === 1`, `count + 1`, `open = !open` | Ignored |
+| `$dispatch('open-modal')`, `tabs('general')`, `{ open: false }` | Ignored |
+| `x-model="name"` | Ignored: use `@input` and a method |
+
+An ignored attribute logs "Alpine is unable to interpret the following
+expression using the CSP-friendly build" as a console warning and the element
+does nothing. No test fails by itself, which is why
+[Testing the strict rules](#testing-the-strict-rules) exists.
+
+A method named in `@event` receives the event. Inside a method or getter,
+`this.$el` is the element whose attribute named it, so one getter can answer
+differently for each tab. Negations, comparisons and arguments become getters
+and `data-*` attributes.
+
+`x-show`, `x-transition` and `x-trap.noscroll` set styles through the DOM, which
+`style-src 'self'` allows. `:style` works only when the getter returns an
+object; a string is written as a `style` attribute and blocked. Prefer `:class`.
+
+### Components live in app.js
+
+```js
+// app/static/js/app.js
+document.addEventListener('alpine:init', () => {
+  // Open/closed: dropdowns, the mobile menu, modals, bottom sheets, the Info box.
+  Alpine.data('disclosure', () => ({
+    open: false,
+    toggle() { this.open = !this.open; },
+    show() { this.open = true; },
+    close() { this.open = false; },
+  }));
+
+  // A flash message the reader can dismiss.
+  Alpine.data('dismissible', () => ({
+    shown: true,
+    dismiss() { this.shown = false; },
+  }));
+
+  // Tabs. The root carries data-active; each tab and panel carries data-tab.
+  Alpine.data('tabs', () => ({
+    active: '',
+    init() { this.active = this.$el.dataset.active; },
+    select() { this.active = this.$el.dataset.tab; },
+    get selected() { return this.active === this.$el.dataset.tab; },
+  }));
+
+  // Toasts raised by HX-Trigger: {"toast": {"message": "…", "level": "success"}}.
+  // Whole class strings, so the Tailwind build finds them in this file.
+  const TONES = {
+    success: 'bg-green-50 text-green-800 ring-green-200',
+    error: 'bg-red-50 text-red-800 ring-red-200',
+  };
+  Alpine.data('toasts', () => ({
+    items: [],
+    add(event) {
+      const id = Date.now() + Math.random();
+      const { message, level } = event.detail;
+      this.items.push({ id, message, classes: TONES[level] || TONES.success });
+      setTimeout(() => { this.items = this.items.filter((t) => t.id !== id); }, 5000);
+    },
+  }));
+});
+
+// Replaces onclick="history.back()": <button type="button" data-back>.
+document.addEventListener('click', (event) => {
+  if (event.target.closest('[data-back]')) history.back();
+});
+
+// Replaces hx-on::response-error: a failure the server did not explain.
+function requestFailed(event) {
+  const xhr = event.detail.xhr;
+  if (xhr && xhr.getResponseHeader('HX-Trigger')) return;   // the server sent its own toast
+  window.dispatchEvent(new CustomEvent('toast', {
+    detail: { level: 'error', message: document.body.dataset.errorMessage },
+  }));
+}
+document.addEventListener('htmx:responseError', requestFailed);
+document.addEventListener('htmx:sendError', requestFailed);
+```
+
+A partial swapped in by HTMX cannot bring its own script, so every component it
+uses is registered here. `make css` run from the project root already scans
+this file for the toast classes.
+
+### The patterns, rewritten
+
+Classes, ARIA and Jinja are those of [Component Patterns](#component-patterns);
+they are shortened here to show the attributes that change.
+
+**Mobile nav and user dropdown.** Two `disclosure` components, one inside the
+other: `open` on the button row is the dropdown, `open` outside it is the
+mobile menu.
+
+```html
+<!-- app/views/partials/_navbar.html -->
+<nav x-data="disclosure" class="border-b border-slate-200 bg-white">
+  <div x-data="disclosure" class="relative">
+    <button type="button" @click="toggle" @keydown.escape="close"
+            :aria-expanded="open" aria-haspopup="menu"
+            class="btn-secondary">{{ current_user.name }}</button>
+    <div x-show="open" @click.outside="close" x-cloak x-transition role="menu"
+         class="absolute end-0 mt-2 w-48 rounded-md bg-white py-1 shadow-lg">…</div>
+  </div>
+
+  <button type="button" @click="toggle" :aria-expanded="open"
+          aria-controls="mobile-menu" class="btn-secondary md:hidden">
+    <span class="sr-only">{{ _('nav.toggle_menu') }}</span>☰
+  </button>
+  <div id="mobile-menu" x-show="open" x-cloak class="border-t md:hidden">…</div>
+</nav>
+```
+
+The language switcher, the mobile bottom sheet and the admin Info box are the
+same component: `x-data="disclosure"`, `@click="toggle"` or `@click="show"`,
+`x-show="open"`, `x-trap.noscroll="open"`.
+
+**Dismissible flash.**
+
+```html
+<!-- app/views/partials/_flash.html -->
+<div x-data="dismissible" x-show="shown" x-transition role="alert" class="…">
+  <span class="flex-1">{{ message }}</span>
+  <button type="button" @click="dismiss" class="opacity-60 hover:opacity-100">
+    <span class="sr-only">{{ _('common.dismiss') }}</span>✕
+  </button>
+</div>
+```
+
+**Modal.** A button inside the component opens it with `@click="show"`. From
+anywhere else, the server opens it with an `HX-Trigger: open-modal` header.
+
+```html
+<!-- app/views/partials/_modal.html -->
+<div x-data="disclosure" @open-modal.window="show" @close-modal.window="close">
+  <div x-show="open" x-cloak class="fixed inset-0 z-50 flex items-center justify-center">
+    <div class="fixed inset-0 bg-black/50" @click="close" aria-hidden="true"></div>
+    <div role="dialog" aria-modal="true" aria-labelledby="modal-title"
+         @keydown.escape.window="close" x-trap.noscroll="open"
+         x-transition class="relative z-10 w-full max-w-md card">
+      <h2 id="modal-title" class="text-lg font-semibold">{% block modal_title %}{% endblock %}</h2>
+      <button type="button" @click="close" class="btn-secondary">{{ _('common.cancel') }}</button>
+    </div>
+  </div>
+</div>
+```
+
+**Tabs.** The same `select` and `selected` on every tab and panel; `data-tab`
+tells them apart.
+
+```html
+<div x-data="tabs" data-active="general">
+  <div role="tablist" class="flex gap-4 border-b border-slate-200">
+    <button type="button" role="tab" id="tab-general" data-tab="general"
+            aria-controls="panel-general" @click="select" :aria-selected="selected"
+            class="px-4 py-2 text-sm aria-selected:text-brand-600">{{ _('settings.general') }}</button>
+    <button type="button" role="tab" id="tab-billing" data-tab="billing"
+            aria-controls="panel-billing" @click="select" :aria-selected="selected"
+            class="px-4 py-2 text-sm aria-selected:text-brand-600">{{ _('settings.billing') }}</button>
+  </div>
+  <div role="tabpanel" id="panel-general" data-tab="general"
+       aria-labelledby="tab-general" x-show="selected">…</div>
+  <div role="tabpanel" id="panel-billing" data-tab="billing"
+       aria-labelledby="tab-billing" x-show="selected" x-cloak>…</div>
+</div>
+```
+
+**Toasts.** The controller code in
+[Toasts from the server](#toasts-from-the-server) is unchanged.
+
+```html
+<!-- app/views/partials/_toasts.html -->
+<div x-data="toasts" @toast.window="add"
+     class="fixed bottom-4 end-4 z-50 flex flex-col gap-2"
+     role="status" aria-live="polite">
+  <template x-for="t in items" :key="t.id">
+    <div x-transition class="rounded-md px-4 py-3 text-sm shadow-lg ring-1"
+         :class="t.classes" x-text="t.message"></div>
+  </template>
+</div>
+```
+
+### Testing the strict rules
+
+A stray expression renders a page that looks right and does nothing. These
+tests read the template source, so they fail before a browser is involved.
+
+```python
+# tests/test_platform/test_csp.py
+import re
+from pathlib import Path
+
+import pytest
+
+from app.config import Config
+
+pytestmark = pytest.mark.skipif(Config.CSP != 'strict', reason='csp: relaxed')
+
+ROOT = Path(__file__).resolve().parents[2]
+TEMPLATES = sorted(p for d in ('app/views', 'plugins') for p in (ROOT / d).rglob('*.html'))
+by_path = pytest.mark.parametrize('path', TEMPLATES, ids=lambda p: str(p.relative_to(ROOT)))
+
+ALPINE_ATTR = re.compile(r'\s(x-[\w:.-]+|[:@][\w:.-]+)="([^"]*)"')   # x-*, :attr, @event
+NAME = re.compile(r'^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$')
+FOR = re.compile(r'^\(?[A-Za-z_$][\w$]*(,\s*[A-Za-z_$][\w$]*)?\)?\s+in\s+[A-Za-z_$][\w$.]*$')
+NOT_EVALUATED = ('x-transition', 'x-cloak', 'x-ref', 'x-id')
+INLINE = re.compile(
+    r'<script(\s[^>]*)?>\s*[^<\s]|<style[\s>]|\sstyle="|\son[a-z]+="|\shx-on[:-]'
+    r'|\shx-vars=|\shx-vals=["\']\s*j(s|avascript):|\shx-trigger="[^"]*\[')
+
+
+@by_path
+def test_alpine_attributes_are_names(path):
+    """The CSP build reads a name, never an expression. Anything else does nothing."""
+    problems = []
+    for attr, value in ALPINE_ATTR.findall(path.read_text(encoding='utf-8')):
+        value = value.strip()
+        if attr.startswith(NOT_EVALUATED):
+            continue
+        if attr.startswith('x-model'):
+            problems.append('x-model does not work in the CSP build; use @input and a method')
+        elif attr == 'x-for':
+            if not FOR.match(value):
+                problems.append(f'x-for="{value}" is not "item in list"')
+        elif not NAME.match(value):
+            problems.append(f'{attr}="{value}" is an expression; move it into app.js')
+    assert not problems, '\n'.join(problems)
+
+
+@by_path
+def test_no_inline_script_style_or_handler(path):
+    """script-src 'self' and style-src 'self' block every one of these."""
+    found = [m.group(0).strip() for m in INLINE.finditer(path.read_text(encoding='utf-8'))]
+    assert not found, f'blocked by the strict CSP: {found}'
+
+
+def test_vendored_alpine_is_the_csp_build():
+    js = (ROOT / 'app/static/js/alpine.min.js').read_text(encoding='utf-8')
+    assert 'CSP-friendly build' in js, 'alpine.min.js is the standard build: run make assets'
+
+
+def test_header_has_no_unsafe_keyword(client):
+    policy = client.get('/health').headers['Content-Security-Policy']
+    assert "'unsafe-" not in policy
+```
+
+The tests cannot see a `:style` getter that returns a string, or a component
+name that `app.js` never registered. Open each new page once with the browser
+console showing: a CSP error or an Alpine warning there is a bug.
 
 ---
 

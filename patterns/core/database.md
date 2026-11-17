@@ -8,7 +8,7 @@
 ## Table of Contents
 
 - [Database Choice](#database-choice)
-- [Auto-Migrations](#auto-migrations)
+- [Migrations](#migrations)
 - [Model Conventions](#model-conventions)
 - [Multi-Tenancy](#multi-tenancy)
 - [Query Patterns](#query-patterns)
@@ -216,7 +216,7 @@ class User(BaseModel):
 ## Multi-Tenancy
 
 Which ownership column your models carry depends on the `tenancy` setting in
-[Project Configuration](../../CLAUDE.md#project-configuration).
+[Project Configuration](../../CLAUDE.md#-project-configuration).
 
 ### Shared (default): organization-owned
 

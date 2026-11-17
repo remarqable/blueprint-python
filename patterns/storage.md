@@ -121,7 +121,7 @@ class Upload(OrgScoped, BaseModel):          # tenancy: shared
 ```
 
 With `tenancy: personal`, replace `OrgScoped` with the user-owned pattern from
-[core/database.md](core/database.md#user-owned-data).
+[core/database.md](core/database.md#personal-user-owned).
 
 ---
 

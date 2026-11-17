@@ -12,6 +12,7 @@
 - [Input Validation](#input-validation)
 - [SQL Injection Prevention](#sql-injection-prevention)
 - [XSS Prevention](#xss-prevention)
+- [Strict CSP (opt-in)](#strict-csp-opt-in)
 - [Session Security](#session-security)
 - [Security Headers](#security-headers)
 - [Secrets Management](#secrets-management)
@@ -364,7 +365,158 @@ right back" page is outside the app's CSP, so its inline script is fine.
 > Handling raw card numbers or health records, or answering a security
 > questionnaire that names `unsafe-eval`? There is a stricter Alpine build that
 > avoids it, at the cost of rewriting every component in JavaScript. Switch
-> before writing components, not after.
+> before writing components, not after. See
+> [Strict CSP (opt-in)](#strict-csp-opt-in).
+
+---
+
+## Strict CSP (opt-in)
+
+> **Applies only when the project's configuration says `csp: strict`**
+> ([Project Configuration](../../CLAUDE.md#-project-configuration)). With
+> `csp: relaxed`, the default, nothing in this section applies: the policy in
+> [XSS Prevention](#xss-prevention) stays, and every template in this blueprint
+> works as written. Skip to [Session Security](#session-security).
+
+The relaxed policy is sound, for the reasons given
+[above](#why-unsafe-eval-is-in-there). The strict one removes `'unsafe-eval'`
+and `'unsafe-inline'` as well, and the price is that every Alpine component is
+written in a JavaScript file instead of in the markup. Choose it for a new
+project that can pay that from the first template, or for one facing a security
+review that names either keyword. It is one or the other: a template written
+for relaxed does nothing under strict.
+
+### The strict policy
+
+```
+default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+```
+
+`img-src` is the same as in relaxed: `https:` stays because an avatar URL can
+point at any host ([mvc.md](mvc.md#views-templates)). Drop it once every image
+is served by the app.
+
+### Selecting the header
+
+One module holds both policies, and the project's answer picks one. It replaces
+the `Content-Security-Policy` line in `add_security_headers` above, so the
+header is set in one place.
+
+```python
+# app/config.py (addition)
+class Config:
+    CSP = 'strict'        # relaxed | strict: the project's `csp:` answer
+```
+
+```python
+# app/platform/csp.py -- init_csp(app), called from create_app
+RELAXED = (
+    "default-src 'self'; script-src 'self' 'unsafe-eval'; "
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
+    "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+)
+STRICT = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; "
+    "img-src 'self' data: https:; font-src 'self'; connect-src 'self'; "
+    "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+)
+POLICIES = {'relaxed': RELAXED, 'strict': STRICT}
+
+
+def init_csp(app):
+    policy = POLICIES[app.config['CSP']]      # a typo fails at boot, not in a browser
+
+    @app.after_request
+    def set_csp(response):
+        response.headers['Content-Security-Policy'] = policy
+        return response
+```
+
+It is a constant in code, not an environment variable: the policy and the
+templates it governs ship in the same commit.
+
+### What it forbids
+
+| Forbidden | Example | In the browser |
+|-----------|---------|----------------|
+| Inline script | `<script>…</script>` in a template | Not run; console error |
+| Inline handlers | `onclick="…"`, any `on*=` | Not run; console error |
+| Inline style | `style="…"`, a `<style>` block | Not applied; console error |
+| `hx-on` and HTMX's other evaluated strings | `hx-on::response-error="…"`, `js:` in `hx-vals`, `hx-trigger="keyup[key=='Enter']"` | Not run |
+| Alpine inline expressions | `x-data="{ open: false }"`, `@click="open = !open"` | The element does nothing; console warning |
+
+Still allowed, because none of it is inline code: `<script src>` and
+`<link rel="stylesheet">` from `/static`, `hx-headers` and `hx-vals` holding
+JSON, `data-*` attributes, and styles set from JavaScript through the DOM
+(which is how Alpine's `x-show` and `x-transition` work).
+
+### What changes in this blueprint
+
+Each of these is written for relaxed. With `csp: strict`, write it this way
+instead:
+
+- **Every Alpine component**: the navbar, flash, modal and toasts in
+  [frontend.md](frontend.md#component-patterns), the language switcher in
+  [i18n.md](i18n.md#switching-languages), the bottom sheet in
+  [mobile-navigation.md](mobile-navigation.md#mobile-bottom-navigation) and the
+  Info box in [deployment.md](deployment.md#the-info-link). Use the CSP build
+  and named components:
+  [Alpine with a Strict CSP](frontend.md#alpine-with-a-strict-csp-opt-in).
+- **Toasts** ([htmx.md](htmx.md#toast-notifications)): the `@toast.window`
+  handler becomes the `toasts` component. The server side is unchanged.
+- **HTMX's indicator styles.** HTMX injects a `<style>` element at load, which
+  `style-src 'self'` blocks, and the `<style>` block in
+  [htmx.md](htmx.md#loading-states) is blocked too. Add this to the layout's
+  `<head>` and move the two `.htmx-indicator` rules into `input.css`:
+
+  ```html
+  <!-- app/views/layouts/base.html -->
+  <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false}'>
+  ```
+
+  `allowEval: false` makes HTMX refuse `hx-on`, `js:` values and trigger
+  filters itself, so a stray one is reported rather than half-working.
+- **`hx-on::response-error="alert(…)"`** ([htmx.md](htmx.md#error-handling)):
+  delete it. The global `htmx:responseError` listener shown beside it goes in
+  `app/static/js/app.js` and raises a toast.
+- **`onclick="history.back()"`**
+  ([mobile-navigation.md](mobile-navigation.md#mobile-header)): the button
+  carries `data-back` and one listener in `app.js` handles every such button.
+- **The Info box** ([deployment.md](deployment.md#the-info-link)):
+  `x-data="{ open: false }"` and `@click="open = true"` become
+  `x-data="disclosure"` and `@click="show"`. `sysinfo.js` is already a static
+  file and sets text and a class through the DOM, so it is unchanged.
+- **The "be right back" page**
+  ([deployment.md](deployment.md#be-right-back-page)): unchanged. Caddy serves
+  it, so its inline script and CSS are outside the app's policy.
+- **Per-tenant branding** (`theming: true` only): the `<style>` block in
+  [theming.md](../theming.md#branding-without-templates) is blocked. Serve the
+  same variables from a route and link it after `app.css`:
+
+  ```python
+  # app/controllers/main.py
+  @bp.route('/brand.css')
+  def brand_css():
+      color = g.org.brand_primary if g.org else None      # validated #RRGGBB on write
+      css = (f':root{{--color-brand-500:{color};--color-brand-600:{color};'
+             f'--color-brand-700:{color}}}') if color else ''
+      return Response(css, mimetype='text/css', headers={'Cache-Control': 'no-cache'})
+  ```
+- **Data for a script**: put it in a `data-*` attribute and read it in
+  `app.js`. Never write a `<script>` block to pass a value.
+- **OAuth** ([auth.md](auth.md#oauth-optional)): start the flow with a link,
+  not a POST form. `form-action 'self'` blocks a form whose response redirects
+  to another origin.
+
+### Moving an existing project
+
+Send the strict policy as `Content-Security-Policy-Report-Only` beside the
+relaxed header. Nothing is blocked, and the browser console lists everything
+strict would block. Convert the templates, then change `CSP` and remove the
+report-only header in the same commit that swaps the Alpine build.
+
+The checks that keep it converted are in
+[frontend.md](frontend.md#testing-the-strict-rules).
 
 ---
 

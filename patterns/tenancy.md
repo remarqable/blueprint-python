@@ -2,7 +2,7 @@
 
 > **Layer doc.** Read this only when `tenancy: shared` in the Project
 > Configuration. If `tenancy: personal`, skip this file entirely and use
-> [core/database.md § User-Owned Data](core/database.md#user-owned-data).
+> [core/database.md § User-Owned Data](core/database.md#personal-user-owned).
 
 Shared database, one row per tenant, `org_id` on every business table. This is
 the right default for almost every SaaS: one schema, one migration history, one
@@ -20,6 +20,7 @@ large customer demands isolation.
 - [Invitations](#invitations)
 - [Tenant Lifecycle](#tenant-lifecycle)
 - [Testing Isolation](#testing-isolation)
+- [Row-Level Security (opt-in)](#row-level-security-opt-in)
 
 ---
 
@@ -481,6 +482,408 @@ def test_write_across_tenants_is_refused(app, acme, globex):
 Add a fixture that creates two organizations for every controller test. If a new
 endpoint leaks, a two-tenant fixture catches it and a single-tenant one never
 will.
+
+---
+
+## Row-Level Security (opt-in)
+
+> Applies only when `tenant_isolation: rls` in the
+> [Project Configuration](../CLAUDE.md#-project-configuration), which requires
+> `tenancy: shared` and `database: postgres`. With `tenant_isolation: app` (the
+> default) **nothing in this section applies**: skip it and build none of it.
+
+Everything above stays exactly as written. `OrgScoped`, the loader-criteria
+filter and the `before_flush` stamp are still how queries are written and
+scoped. RLS adds a second check underneath them, in PostgreSQL: a policy on
+every `OrgScoped` table compares `org_id` with a per-transaction setting,
+`app.org_id`. It covers what the application filter cannot see: raw SQL, Core
+statements, bulk `update()`/`delete()`, a misplaced `unscoped()`.
+
+It is easy to build RLS that enforces nothing and reports no error. Each part
+below closes one way that happens.
+
+### Two roles, two URLs
+
+Superusers and table owners are exempt from RLS. An application that connects
+as the role that ran the migrations has policies that are never applied.
+
+```sql
+-- once per database, as a superuser
+CREATE ROLE app_owner LOGIN PASSWORD '...';               -- owns the tables, runs migrations
+CREATE ROLE app_user  LOGIN PASSWORD '...' NOBYPASSRLS;   -- the web app and the worker
+CREATE DATABASE app OWNER app_owner;
+\c app
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO app_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
+  GRANT USAGE ON SEQUENCES TO app_user;
+```
+
+On an existing database, the role that owns the tables today is `app_owner`:
+skip its `CREATE ROLE` and the `CREATE DATABASE`, and run the rest.
+
+```bash
+# .env
+DATABASE_URL=postgresql+psycopg://app_user:...@localhost:5432/app          # web and worker
+DATABASE_OWNER_URL=postgresql+psycopg://app_owner:...@localhost:5432/app   # migrations only
+```
+
+The application never reads `DATABASE_OWNER_URL`. Only the migration command
+does, everywhere it runs today (systemd `ExecStartPre`, `scripts/deploy.sh`,
+the Docker entrypoint, `make run`; see [core/database.md](core/database.md#migrations)):
+
+```bash
+DATABASE_URL="$DATABASE_OWNER_URL" flask db upgrade
+```
+
+`RUN_MIGRATIONS_ON_STARTUP` stays `False`: `app_user` cannot alter the schema.
+
+### The policy migration
+
+`flask db migrate` does not generate policies. Write them by hand:
+
+```python
+# migrations/versions/xxxx_enable_rls.py
+from alembic import op
+
+# Every table whose model inherits OrgScoped, at this revision.
+ORG_SCOPED_TABLES = ['project']
+
+ORG_ID = "NULLIF(current_setting('app.org_id', true), '')::BIGINT"
+
+
+def upgrade():
+    if op.get_bind().dialect.name != 'postgresql':
+        return
+    for table in ORG_SCOPED_TABLES:
+        op.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
+        op.execute(f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY')
+        op.execute(f'''
+            CREATE POLICY org_isolation ON "{table}"
+              USING      (org_id = {ORG_ID})
+              WITH CHECK (org_id = {ORG_ID})
+        ''')
+
+
+def downgrade():
+    if op.get_bind().dialect.name != 'postgresql':
+        return
+    for table in ORG_SCOPED_TABLES:
+        op.execute(f'DROP POLICY org_isolation ON "{table}"')
+        op.execute(f'ALTER TABLE "{table}" NO FORCE ROW LEVEL SECURITY')
+        op.execute(f'ALTER TABLE "{table}" DISABLE ROW LEVEL SECURITY')
+```
+
+- `USING` decides which rows a statement can see (SELECT, UPDATE, DELETE);
+  `WITH CHECK` decides which rows it may write (INSERT, and the new value of an
+  UPDATE). State both.
+- `current_setting(..., true)` returns NULL when the setting was never set,
+  instead of raising. `org_id = NULL` matches nothing.
+- `NULLIF(..., '')` is required. Once a pooled connection has had the setting,
+  later transactions read it as `''`, not NULL, and `''::BIGINT` raises.
+- `FORCE` applies the policy to the owner too. Without it `app_owner` sees
+  every row, so a `DATABASE_URL` pointed at the owner by mistake fails open.
+- Tables that are not `OrgScoped` get no policy: `organization`, `user`,
+  `membership`, `invitation` and `job` are read before the organization is known.
+- Every later migration that creates an `OrgScoped` table repeats the three
+  statements for it. A test below fails when one is forgotten.
+
+`FORCE` has two costs for the owner. A data migration on an `OrgScoped` table
+updates **zero rows** and reports success: put `NO FORCE ROW LEVEL SECURITY`
+before it and `FORCE ROW LEVEL SECURITY` after it in the same migration (DDL
+is transactional, so the window never commits). And `pg_dump` as `app_owner`
+stops with `query would be affected by row-level security policy`: take
+backups as a superuser.
+
+### Setting the organization
+
+`set_config('app.org_id', ..., true)` is `SET LOCAL` with a bind parameter. The
+value lasts until the transaction ends, so it cannot reach the next request
+that draws the same connection from the pool. The cost is that it must be set
+again in **every** transaction, and `save()` commits, so one request has
+several. The session's `after_begin` event runs at the start of each one:
+
+```python
+# app/platform/rls.py
+from contextlib import contextmanager
+
+import sqlalchemy as sa
+from flask import g, has_request_context
+from sqlalchemy import event
+from sqlalchemy.orm import Session
+
+from app.extensions import db
+
+_SET_ORG = sa.text("SELECT set_config('app.org_id', :org_id, true)")
+
+
+def _current_org_id(session) -> int | None:
+    if 'org_id' in session.info:                 # org_scope(): jobs, CLI
+        return session.info['org_id']
+    org = getattr(g, 'org', None) if has_request_context() else None
+    if org is None:
+        return None
+    # Not org.id: after a commit the object is expired, and loading it here
+    # would run a query inside after_begin, which SQLAlchemy refuses.
+    return sa.inspect(org).identity[0]
+
+
+def _set_org(connection, org_id: int | None) -> None:
+    if connection.dialect.name != 'postgresql':
+        return
+    connection.execute(_SET_ORG, {'org_id': '' if org_id is None else str(org_id)})
+
+
+@event.listens_for(Session, 'after_begin')
+def _set_org_on_begin(session, _transaction, connection):
+    """Every transaction the session opens starts by naming its organization."""
+    org_id = _current_org_id(session)
+    if org_id is not None:
+        _set_org(connection, org_id)
+
+
+def init_rls(app):
+    @app.before_request
+    def set_org_on_open_transaction():
+        # resolve_tenant() has already queried, so a transaction is open that
+        # began before g.org was known. Name the organization on it now, or
+        # clear it when this request has none.
+        session = db.session()                   # the real Session, not the proxy
+        org_id = _current_org_id(session)
+        if org_id is not None or session.in_transaction():
+            _set_org(session.connection(), org_id)
+
+
+@contextmanager
+def org_scope(org_id: int):
+    """Run a block as one organization, outside a request (jobs, CLI, tests)."""
+    db.session.info['org_id'] = org_id
+    try:
+        _set_org(db.session.connection(), org_id)
+        yield
+        _set_org(db.session.connection(), None)
+    except Exception:
+        db.session.rollback()
+        raise
+    finally:
+        db.session.info.pop('org_id', None)
+```
+
+```python
+# app/__init__.py -- tenant_isolation: rls only, directly after init_tenant(app)
+from .platform.rls import init_rls
+init_rls(app)
+```
+
+`init_rls` must come after `init_tenant`: `before_request` hooks run in
+registration order, and this one needs `g.org` from
+[Tenant Resolution](#tenant-resolution). Three rules:
+
+- **Never `SET app.org_id`, and never `set_config(..., false)`.** A session-level
+  value survives the pool's rollback and is handed to the next request.
+- **Go through `db.session`.** A connection taken from `db.engine` never passes
+  the hook, and on an autocommit connection `SET LOCAL` is a no-op.
+- **No organization means no rows.** On installation pages (`g.org` is `None`),
+  in `flask shell`, in a CLI command, and in either mistake above, every
+  `OrgScoped` query returns zero rows and every insert raises. In `app` mode
+  those paths see all rows; here an unexpectedly empty list means a missing
+  scope, not an empty table.
+
+A refused INSERT, or an UPDATE that moves a row to another organization, raises
+`sqlalchemy.exc.ProgrammingError` (`new row violates row-level security
+policy`). A cross-organization UPDATE or DELETE raises nothing: it matches zero
+rows.
+
+### Jobs and platform code
+
+[`unscoped()`](#the-escape-hatch) switches off the application filter and
+nothing else: under RLS the database still filters, so it no longer widens a
+query. The worker connects as `app_user` like the web app, and code outside a
+request names its organization with `org_scope`. When `jobs: true`
+([jobs.md § Tenancy](jobs.md#tenancy)), wrap the handler call in `_execute`:
+
+```python
+# app/controllers/jobs_cli.py -- in _execute(), in place of the bare handler call
+if job.org_id is not None:
+    with org_scope(job.org_id):                  # a job for one organization
+        HANDLERS[job.name](job.payload)
+else:
+    HANDLERS[job.name](job.payload)              # sees no OrgScoped rows by itself
+```
+
+Work that crosses organizations is a loop, each pass in its own scope:
+
+```python
+# app/jobs/billing.py
+for org in Organization.query.filter_by(is_active=True):
+    with org_scope(org.id):
+        generate_invoice(org)
+```
+
+Deleting an `Organization` still cascades to its rows; foreign-key actions are
+not subject to policies. If platform code needs one query across every
+organization, give it a separate read-only role with `BYPASSRLS` and its own
+URL. Never widen `app_user`, and never use that role in a request.
+
+### Testing RLS
+
+These tests pass on a broken setup in three ways: connected as a superuser or
+the owner (the usual CI `postgres` user bypasses RLS), asserting through the
+ORM (the application filter passes the test by itself), or run on SQLite. So
+they connect as `app_user`, use raw SQL, and run on PostgreSQL even when
+development uses SQLite. They need their own database, because the main `app`
+fixture runs `drop_all()`; CI creates it and the two roles with the SQL above.
+
+```python
+# tests/conftest.py
+import flask_migrate
+import sqlalchemy as sa
+
+RLS_URL = os.environ.get('TEST_RLS_DATABASE_URL')          # app_user
+RLS_OWNER_URL = os.environ.get('TEST_RLS_OWNER_URL')       # app_owner, same database
+
+
+@pytest.fixture
+def rls_app():
+    if not (RLS_URL and RLS_OWNER_URL):
+        if os.environ.get('CI'):
+            pytest.fail('CI must set TEST_RLS_DATABASE_URL and TEST_RLS_OWNER_URL')
+        pytest.skip('RLS tests need PostgreSQL and both roles')
+
+    class OwnerConfig(TestConfig):
+        SQLALCHEMY_DATABASE_URI = RLS_OWNER_URL
+        SQLALCHEMY_ENGINE_OPTIONS = {}
+
+    class RlsConfig(TestConfig):
+        SQLALCHEMY_DATABASE_URI = RLS_URL
+        SQLALCHEMY_ENGINE_OPTIONS = {'pool_size': 1, 'max_overflow': 0}   # reuse is certain
+
+    with create_app(OwnerConfig).app_context():      # the real migrations, as the owner
+        flask_migrate.upgrade()
+        tables = ', '.join(f'"{t.name}"' for t in db.metadata.sorted_tables)
+        db.session.execute(sa.text(f'TRUNCATE {tables} RESTART IDENTITY CASCADE'))
+        db.session.commit()
+        db.engine.dispose()
+
+    app = create_app(RlsConfig)
+    with app.app_context():
+        yield app
+        db.session.remove()
+        db.engine.dispose()
+```
+
+```python
+# tests/test_rls.py
+import pytest
+import sqlalchemy as sa
+from flask import jsonify
+from sqlalchemy.exc import ProgrammingError
+
+from app.extensions import db
+from app.models import Membership, Organization, Project, User
+from app.models.base import OrgScoped
+from app.platform.rls import org_scope
+
+DENIED = 'row-level security'
+
+
+def names():
+    # Raw SQL on purpose: an ORM query would pass on the application filter alone.
+    return db.session.execute(sa.text('SELECT name FROM project ORDER BY id')).scalars().all()
+
+
+@pytest.fixture
+def two_orgs(rls_app):
+    ids = []
+    for slug, project in (('acme', 'acme-a'), ('globex', 'globex-secret')):
+        org = Organization(name=slug, slug=slug).save()
+        with org_scope(org.id):
+            Project(org_id=org.id, name=project).save()
+        ids.append(org.id)
+    return ids
+
+
+def test_runtime_role_cannot_bypass(rls_app):
+    assert db.session.execute(sa.text(
+        "SELECT rolsuper OR rolbypassrls OR EXISTS (SELECT 1 FROM pg_tables "
+        "WHERE schemaname = 'public' AND tableowner = current_user) "
+        "FROM pg_roles WHERE rolname = current_user")).scalar() is False
+
+
+def test_every_org_scoped_table_has_a_forced_policy(rls_app):
+    tables = {m.local_table.name for m in db.Model.registry.mappers
+              if issubclass(m.class_, OrgScoped)}
+    protected = set(db.session.execute(sa.text(
+        "SELECT c.relname FROM pg_class c JOIN pg_policies p "
+        "  ON p.schemaname = 'public' AND p.tablename = c.relname "
+        "WHERE c.relnamespace = 'public'::regnamespace "
+        "  AND c.relrowsecurity AND c.relforcerowsecurity "
+        "  AND p.qual IS NOT NULL AND p.with_check IS NOT NULL")).scalars())
+    assert tables and tables <= protected, tables - protected
+
+
+def test_isolation_in_every_direction(two_orgs):
+    acme, globex = two_orgs
+    with org_scope(acme):
+        assert names() == ['acme-a']                                        # read
+        run = lambda sql: db.session.execute(sa.text(sql), {'g': globex})
+        assert run("UPDATE project SET name = 'x' WHERE org_id = :g").rowcount == 0
+        assert run('DELETE FROM project WHERE org_id = :g').rowcount == 0
+        smuggle = sa.insert(Project.__table__).values(org_id=globex, name='smuggled')
+        move = sa.text('UPDATE project SET org_id = :g')                   # own row, other org
+        for statement in (smuggle, move):
+            with pytest.raises(ProgrammingError, match=DENIED):
+                db.session.execute(statement, {'g': globex})
+            db.session.rollback()
+    with org_scope(globex):
+        assert names() == ['globex-secret']                                 # untouched
+
+
+def test_no_org_means_no_rows_and_no_writes(two_orgs):
+    assert names() == []
+    with pytest.raises(ProgrammingError, match=DENIED):
+        db.session.execute(sa.insert(Project.__table__).values(org_id=two_orgs[0], name='orphan'))
+
+
+def test_next_request_on_the_same_connection_inherits_nothing(rls_app, two_orgs):
+    @rls_app.get('/_rls_probe')
+    def probe():
+        pid = db.session.execute(sa.text('SELECT pg_backend_pid()')).scalar()
+        return jsonify(names=names(), pid=pid)
+
+    owner = User.create('owner@acme.test', 'Owner')
+    Membership(user_id=owner.id, org_id=two_orgs[0], role='owner').save()
+    client = rls_app.test_client()
+    login_as(client, owner)
+
+    first = client.get('/_rls_probe', base_url='http://acme.localhost').json
+    second = client.get('/_rls_probe', base_url='http://localhost').json    # two orgs: no default org
+    assert first['names'] == ['acme-a']
+    assert second['names'] == [] and second['pid'] == first['pid']
+```
+
+Policy predicates are planned like any other condition, so they are as fast as
+the index behind them: keep `org_id` leading every composite index, and never
+put a subquery in a policy. The hook adds one round trip per transaction.
+
+### RLS checklist
+
+- [ ] `tenant_isolation: rls` recorded, with `tenancy: shared` and `database: postgres`
+- [ ] `DATABASE_URL` is `app_user`: `NOBYPASSRLS`, not a superuser, owns no table
+- [ ] Migrations run as `app_owner` through `DATABASE_OWNER_URL`, nowhere else
+- [ ] Every `OrgScoped` table: `ENABLE` and `FORCE ROW LEVEL SECURITY`, one policy
+      with `USING` and `WITH CHECK`
+- [ ] The policy reads `NULLIF(current_setting('app.org_id', true), '')::BIGINT`
+- [ ] Each new `OrgScoped` table gets its policy in the migration that creates it
+- [ ] `init_rls(app)` is called directly after `init_tenant(app)`
+- [ ] `app.org_id` is set only by `app/platform/rls.py`, always with `true`
+- [ ] Jobs and CLI code enter `org_scope`; cross-organization work loops over it
+- [ ] Data migrations on `OrgScoped` tables lift and restore `FORCE`; backups
+      run as a superuser
+- [ ] `tests/test_rls.py` runs in CI on PostgreSQL as `app_user`, and fails
+      rather than skips when its URLs are missing
 
 ---
 

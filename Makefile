@@ -4,6 +4,8 @@ TAILWIND_VERSION := v4.1.14
 TAILWIND_BIN := bin/tailwindcss
 HTMX_VERSION := 2.0.4
 ALPINE_VERSION := 3.14.9
+# csp: strict projects run `make assets ALPINE_PKG=@alpinejs/csp` (core/frontend.md)
+ALPINE_PKG ?= alpinejs
 
 help:
 	@echo "Usage: make [target]"
@@ -19,7 +21,7 @@ help:
 	@echo "  test       Run tests (SQLite in-memory)"
 	@echo "  test-postgres  Run tests against PostgreSQL"
 	@echo "  skills     Link blueprint skills into .claude/skills"
-	@echo "  check      Verify VERSION has a matching file in upgrades/ (blueprint repo only)"
+	@echo "  check      Verify internal links and version bookkeeping (blueprint repo only)"
 	@echo "  clean      Remove .venv and cache files"
 	@echo "  deploy     Deploy the application"
 	@echo "  provision  Show server provisioning instructions"
@@ -54,8 +56,9 @@ css-watch: $(TAILWIND_BIN)
 assets:
 	@mkdir -p app/static/js
 	curl -sL -o app/static/js/htmx.min.js   https://unpkg.com/htmx.org@$(HTMX_VERSION)/dist/htmx.min.js
-	curl -sL -o app/static/js/alpine.min.js https://unpkg.com/alpinejs@$(ALPINE_VERSION)/dist/cdn.min.js
-	@echo "Vendored htmx $(HTMX_VERSION) and alpine $(ALPINE_VERSION)."
+	curl -sL -o app/static/js/alpine.min.js https://unpkg.com/$(ALPINE_PKG)@$(ALPINE_VERSION)/dist/cdn.min.js
+	curl -sL -o app/static/js/alpine-focus.min.js https://unpkg.com/@alpinejs/focus@$(ALPINE_VERSION)/dist/cdn.min.js
+	@echo "Vendored htmx $(HTMX_VERSION), $(ALPINE_PKG) $(ALPINE_VERSION) and the Alpine focus plugin."
 
 migrate:
 	uv run flask db upgrade
@@ -103,6 +106,7 @@ skills:
 	echo "Skills linked. Restart Claude Code to pick them up."
 
 check:
+	./scripts/check-links.py
 	./scripts/check-version.py
 
 deploy:
