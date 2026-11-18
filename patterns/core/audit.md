@@ -74,14 +74,14 @@ class AuditMixin:
     def created_by_name(self) -> str:
         """Return full name of creator."""
         if self.created_by:
-            return f"{self.created_by.first_name} {self.created_by.last_name}"
+            return self.created_by.name
         return ""
 
     @property
     def updated_by_name(self) -> str:
         """Return full name of last updater."""
         if self.updated_by:
-            return f"{self.updated_by.first_name} {self.updated_by.last_name}"
+            return self.updated_by.name
         return ""
 ```
 
@@ -350,10 +350,10 @@ db.session.commit()
 creators and editors in the same statement: one query for 3 rows and for 30
 ([performance.md](performance.md#relationship-loading)). Three things to know:
 
-- **The `*_name` properties read `first_name` and `last_name`.** The `User` in
-  [mvc.md](mvc.md#models-fat-models) has a single `name`, and on such a project
-  the properties raise `AttributeError`. There, read the relationship:
-  `{% if item.created_by %}{{ item.created_by.name }}{% endif %}`.
+- **The `*_name` properties read `User.name`**, the single name field on the
+  `User` in [mvc.md](mvc.md#models-fat-models). Before 2.1.1 they read
+  `first_name` and `last_name`, which that model does not have; a project whose
+  `User` does have those two fields keeps its own version of the properties.
 - **The join is paid by every query that returns the model**, and it loads whole
   `User` rows. A list that shows no names can drop it for that query with
   `.options(lazyload(Contact.created_by), lazyload(Contact.updated_by))`.

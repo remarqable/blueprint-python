@@ -71,7 +71,7 @@ realtime: false        # true | false
 ai: false              # true | false  (requires jobs: true)
 tenant_isolation: app  # app | rls  (rls requires tenancy: shared and database: postgres)
 csp: relaxed           # relaxed | strict
-blueprint_version: 2.1.0   # the VERSION this project was built against
+blueprint_version: 2.1.1   # the VERSION this project was built against
 ```
 
 ### The questions to ask

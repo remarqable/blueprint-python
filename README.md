@@ -86,8 +86,8 @@ See [skills/README.md](skills/README.md).
 `blueprint_version` in its own `CLAUDE.md`.
 
 ```bash
-cd blueprint && git fetch --tags && git checkout v2.1.0
-cd .. && git add blueprint && git commit -m "Update the blueprint to 2.1.0"
+cd blueprint && git fetch --tags && git checkout v2.1.1
+cd .. && git add blueprint && git commit -m "Update the blueprint to 2.1.1"
 # then ask the agent: "upgrade to the new blueprint version"
 ```
 
