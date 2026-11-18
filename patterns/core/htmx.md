@@ -222,7 +222,7 @@ def create_item():
 
     # Trigger with data
     response.headers['HX-Trigger'] = json.dumps({
-        'showToast': {'message': 'Item created!', 'type': 'success'}
+        'toast': {'message': 'Item created!', 'level': 'success'}
     })
 
     return response
@@ -339,7 +339,7 @@ def delete_item():
 
     response = make_response('', 200)
     response.headers['HX-Trigger'] = json.dumps({
-        'showToast': {
+        'toast': {
             'title': 'Success',
             'message': 'Item deleted'
         }
